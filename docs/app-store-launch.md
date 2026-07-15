@@ -83,6 +83,17 @@ The customer app only reads a published, timestamped catalogue. It never trigger
 - [ ] For a new personal Play account, complete Google's required closed testing and device-verification steps before production access.
 - [ ] Submit Android first to internal/closed testing, then Apple TestFlight, then production after feedback.
 
+## Phase 6: How-To Videos
+
+- [ ] Record a short website walkthrough showing location consent, a generic search, an exact-size search, best-price ordering, per-unit pricing, pagination, and adding an individual product to the basket.
+- [ ] Record a short mobile walkthrough showing location consent, catalogue search, choosing a retailer result, adding an item, scan progress, comparing basket totals, and updating or removing an item.
+- [ ] Record a correction walkthrough showing how a user reports a missing product, incorrect match, stale price, or wrong pack size.
+- [ ] Produce portrait versions for the mobile app and social channels, plus a landscape website version.
+- [ ] Add captions and a written transcript to every video. Keep each task-focused video under two minutes where possible.
+- [ ] Use production-like sample data without exposing account details, precise location, retailer credentials, API keys, or private browser history.
+- [ ] Publish the videos on the website help page and link them from app support, onboarding, and the store-review instructions where useful.
+- [ ] Re-record affected clips whenever a release materially changes search, location consent, basket controls, or price comparison.
+
 ## Cost Guardrails
 
 - Cloudflare Workers Free, D1 Free, and R2 Free are appropriate for an early public beta. Set usage alerts and hard operational limits.
