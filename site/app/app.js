@@ -612,12 +612,31 @@ function closeFeedback() {
 }
 
 function submitFeedback(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
   const button = $("#feedbackSubmitBtn");
   const status = $("#feedbackStatus");
   $("#feedbackContext").value = `${window.location.origin}${window.location.pathname}`;
   button.disabled = true;
   button.textContent = "Sending...";
   status.textContent = "Sending your suggestion to RandBasket...";
+  const fields = Object.fromEntries(new FormData(form).entries());
+  api("/v1/feedback", {
+    method: "POST",
+    body: JSON.stringify(fields),
+  }).then(() => {
+    form.reset();
+    status.textContent = "Thank you - your suggestion has been emailed to RandBasket.";
+    button.textContent = "Sent";
+    window.setTimeout(() => {
+      button.textContent = "Send another suggestion";
+      button.disabled = false;
+    }, 1400);
+  }).catch((error) => {
+    status.textContent = error.message;
+    button.textContent = "Try again";
+    button.disabled = false;
+  });
 }
 
 function wireEvents() {
@@ -672,15 +691,7 @@ async function init() {
   renderResults();
   updateSummary();
   wireEvents();
-  const url = new URL(window.location.href);
-  if (url.searchParams.get("feedback") === "sent") {
-    openFeedback();
-    $("#feedbackForm").reset();
-    $("#feedbackStatus").textContent = "Thank you - your suggestion has been submitted.";
-    $("#feedbackSubmitBtn").textContent = "Send another suggestion";
-    url.searchParams.delete("feedback");
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  } else if (window.location.hash === "#suggestions") {
+  if (window.location.hash === "#suggestions") {
     openFeedback();
   }
 }
@@ -691,6 +702,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=13").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=14").catch(() => {});
   });
 }
