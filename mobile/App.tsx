@@ -15,9 +15,9 @@ import {
   TextInput,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
-  AppStatePayload,
   CatalogueProduct,
   CatalogueRequestResponse,
   CatalogueResponse,
@@ -26,11 +26,12 @@ import {
   ItemScan,
   requestJson,
   ScanEntry,
-  ScanJobResponse,
   Settings,
   Store,
 } from "./src/api";
 import { money, niceDate } from "./src/format";
+
+const storageKey = "randbasket-device-state-v1";
 
 const blankLinks: Record<string, string> = {
   "pick-n-pay": "",
@@ -57,16 +58,8 @@ const scanSteps = [
   "Preparing your fresh results",
 ];
 
-function getItemLinkCount(item: GroceryItem) {
-  return Object.values({ ...blankLinks, ...(item.links || {}) }).filter(Boolean).length;
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export default function App() {
-  const [apiUrl, setApiUrl] = useState(getDefaultApiUrl());
+  const apiUrl = getDefaultApiUrl();
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [stores, setStores] = useState<Store[]>([
@@ -92,7 +85,7 @@ export default function App() {
   const [catalogueHasMore, setCatalogueHasMore] = useState(false);
   const [lastRequestedQuery, setLastRequestedQuery] = useState("");
   const [catalogueLoading, setCatalogueLoading] = useState(false);
-  const [status, setStatus] = useState("Enter your price server link, then connect.");
+  const [status, setStatus] = useState("Loading your saved basket...");
 
   const bestBasket = useMemo(() => {
     if (!latest?.bestBasketStoreId) return null;
@@ -114,10 +107,10 @@ export default function App() {
   }, [progressAnim, scanProgress]);
 
   useEffect(() => {
-    if (!hydrated || !apiUrl.trim() || scanning) return undefined;
+    if (!hydrated || scanning) return undefined;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      setAutoSaveStatus("Saving...");
+      setAutoSaveStatus("Saving on this device...");
       saveAll(items, settings, true)
         .then(() => setAutoSaveStatus("Saved"))
         .catch(() => setAutoSaveStatus("Not saved"));
@@ -125,24 +118,34 @@ export default function App() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [apiUrl, hydrated, items, scanning, settings]);
+  }, [hydrated, items, scanning, settings]);
+
+  useEffect(() => {
+    async function loadDeviceState() {
+      try {
+        const saved = await AsyncStorage.getItem(storageKey);
+        if (saved) {
+          const payload = JSON.parse(saved) as { items?: GroceryItem[]; settings?: Settings; latest?: ScanEntry | null };
+          setItems(payload.items || []);
+          setSettings(payload.settings || defaultSettings);
+          setLatest(payload.latest || null);
+        }
+        setStatus("Ready to compare current catalogue prices.");
+      } catch {
+        setStatus("Ready to compare current catalogue prices.");
+      } finally {
+        setHydrated(true);
+      }
+    }
+    void loadDeviceState();
+  }, []);
 
   async function loadState() {
-    if (!apiUrl.trim()) {
-      Alert.alert("Price server link needed", "Use the phone link from the desktop app while we are developing.");
-      return;
-    }
     setLoading(true);
-    setStatus("Connecting to price checker...");
+    setStatus("Refreshing the catalogue connection...");
     try {
-      const payload = await requestJson<AppStatePayload>(apiUrl, "/api/state");
-      setItems(payload.items || []);
-      setSettings(payload.settings || defaultSettings);
-      setStores(payload.stores || stores);
-      setLatest(payload.history?.[0] || null);
-      setHydrated(true);
-      setAutoSaveStatus("Saved");
-      setStatus(`Connected to ${payload.mobileUrl || payload.localUrl || apiUrl}`);
+      await requestJson<{ ok: boolean }>(apiUrl, "/v1/health");
+      setStatus("Connected. Your basket stays saved on this phone.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not connect");
     } finally {
@@ -151,58 +154,15 @@ export default function App() {
   }
 
   async function saveAll(nextItems = items, nextSettings = settings, silent = false) {
-    await requestJson(apiUrl, "/api/items", {
-      method: "POST",
-      body: JSON.stringify({ items: nextItems }),
-    });
-    const saved = await requestJson<{ settings: Settings }>(apiUrl, "/api/settings", {
-      method: "POST",
-      body: JSON.stringify({ settings: nextSettings }),
-    });
+    await AsyncStorage.setItem(storageKey, JSON.stringify({ items: nextItems, settings: nextSettings, latest }));
     if (!silent) {
-      setSettings(saved.settings);
       setAutoSaveStatus("Saved");
     }
   }
 
-  async function pollScanJob(jobId: string) {
-    for (let attempt = 0; attempt < 900; attempt += 1) {
-      const payload = await requestJson<ScanJobResponse>(
-        apiUrl,
-        `/api/scan/status?id=${encodeURIComponent(jobId)}`,
-      );
-      const job = payload.job;
-      const progress = Number(job.progress || 0);
-      setScanProgress(progress);
-      setScanStepIndex(Math.min(scanSteps.length - 1, Math.floor((progress / 100) * scanSteps.length)));
-      setScanStatusMessage(job.message || `${job.currentStore || "Retailers"} ${job.currentItem || ""}`.trim() || scanSteps[1]);
-
-      if (job.status === "complete" && job.result) {
-        return job.result;
-      }
-      if (job.status === "error") {
-        throw new Error(job.error || job.message || "Scan failed");
-      }
-      await wait(1200);
-    }
-    throw new Error("The scan is taking too long. Please try again.");
-  }
-
   async function scanPrices() {
-    if (!apiUrl.trim()) {
-      Alert.alert("Price server link needed", "Connect to your price server first.");
-      return;
-    }
     if (items.length === 0) {
       Alert.alert("Basket is empty", "Add at least one grocery item before scanning prices.");
-      return;
-    }
-    const unverified = items.filter((item) => getItemLinkCount(item) === 0);
-    if (unverified.length > 0) {
-      Alert.alert(
-        "Catalogue match needed",
-        `${unverified[0].name || "This item"} does not have retailer product links yet. Search the catalogue and pick an exact product, or request it if it is missing.`,
-      );
       return;
     }
     setScanning(true);
@@ -219,12 +179,13 @@ export default function App() {
       setStatus("Checking cached catalogue prices...");
       const entry = await requestJson<ScanEntry>(apiUrl, "/api/scan/catalogue", {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ items, settings }),
       });
       setScanProgress(100);
       setScanStepIndex(scanSteps.length - 1);
       setScanStatusMessage("Catalogue price check complete");
       setLatest(entry);
+      await AsyncStorage.setItem(storageKey, JSON.stringify({ items, settings, latest: entry }));
       setStatus(`Updated ${niceDate(entry.createdAt)}`);
       setView("results");
     } catch (error) {
@@ -236,10 +197,6 @@ export default function App() {
   }
 
   async function searchCatalogue(page = 1) {
-    if (!apiUrl.trim()) {
-      Alert.alert("Price server link needed", "Connect to your price server first.");
-      return;
-    }
     const query = catalogueSearch.trim();
     if (!query) {
       setCatalogueResults([]);
@@ -374,21 +331,11 @@ export default function App() {
           </View>
 
           <View style={styles.panel}>
-            <Text style={styles.label}>Price server link</Text>
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              onChangeText={setApiUrl}
-              placeholder="http://192.168.x.x:8765"
-              style={styles.input}
-              value={apiUrl}
-            />
             <View style={styles.row}>
-              <Button disabled={loading} label={loading ? "Connecting..." : "Connect"} onPress={loadState} />
+              <Button disabled={loading} label={loading ? "Checking..." : "Check connection"} onPress={loadState} />
               <Text style={styles.status}>{status}</Text>
             </View>
-            {hydrated ? <Text style={styles.saveStatus}>Basket sync: {autoSaveStatus || "Watching changes"}</Text> : null}
+            {hydrated ? <Text style={styles.saveStatus}>Basket: {autoSaveStatus || "Saved on this phone"}</Text> : null}
           </View>
 
           {view !== "scanning" ? (

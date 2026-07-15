@@ -39,6 +39,20 @@ type SearchProfileRow = {
   preferred_terms_json: string;
 };
 
+type BasketItem = {
+  id?: string;
+  name?: string;
+  query?: string;
+  targetSize?: string;
+  quantity?: number;
+  category?: string;
+  links?: Record<string, string>;
+};
+
+type BasketSettings = {
+  stores?: Record<string, boolean>;
+};
+
 const retailers = [
   { id: "pick-n-pay", name: "Pick n Pay" },
   { id: "checkers", name: "Checkers" },
@@ -183,6 +197,28 @@ function centsToPrice(cents: number | null) {
   return cents == null ? null : Number((cents / 100).toFixed(2));
 }
 
+type Measure = { amount: number; kind: "mass" | "volume" };
+
+function parseMeasure(value: string | undefined) {
+  const match = String(value || "").toLowerCase().match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (unit === "kg") return { amount: amount * 1000, kind: "mass" } satisfies Measure;
+  if (unit === "g") return { amount, kind: "mass" } satisfies Measure;
+  if (unit === "l") return { amount: amount * 1000, kind: "volume" } satisfies Measure;
+  return { amount, kind: "volume" } satisfies Measure;
+}
+
+function normaliseForTarget(price: number | null, offeredSize: string | undefined, targetSize: string | undefined) {
+  if (price == null) return null;
+  const offered = parseMeasure(offeredSize);
+  const target = parseMeasure(targetSize);
+  if (!offered || !target || offered.kind !== target.kind) return price;
+  return Number((price * target.amount / offered.amount).toFixed(2));
+}
+
 function offerToStore(offer: OfferRow) {
   const priceCents = offer.normalized_price_cents ?? offer.price_cents;
   const price = priceCents && priceCents > 0 ? centsToPrice(priceCents) : null;
@@ -323,6 +359,90 @@ async function queueRequest(request: Request, env: Env) {
   return json(request, env, { ok: true, request: { id, query, source: body.source || "public-app", status: "queued", createdAt: now, updatedAt: now } }, 202);
 }
 
+async function exactOffer(env: Env, retailerId: string, productUrl: string) {
+  if (!productUrl) return null;
+  return env.DB.prepare(
+    `SELECT product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label,
+            price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type,
+            promo_applied, image_url, product_url, last_seen_at
+     FROM catalogue_offers WHERE retailer_id = ?1 AND product_url = ?2 LIMIT 1`,
+  ).bind(retailerId, productUrl).first<OfferRow>();
+}
+
+async function scanBasket(request: Request, env: Env) {
+  const body = await request.json<{ items?: BasketItem[]; settings?: BasketSettings }>().catch(() => ({}));
+  const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
+  if (!items.length) return json(request, env, { ok: false, error: "Add at least one item before checking prices." }, 400);
+  const enabledRetailers = retailers.filter((retailer) => body.settings?.stores?.[retailer.id] !== false);
+  const scans = [];
+
+  for (const item of items) {
+    const query = String(item.query || item.name || "").trim();
+    const quantity = Math.max(0.01, Number(item.quantity || 1));
+    const lookup = query ? await findCatalogue(env, query, 1, 10) : { retailerMatches: [] as Array<{ stores: ReturnType<typeof offerToStore>[] }> };
+    const results = [];
+    for (const retailer of enabledRetailers) {
+      const linkedOffer = await exactOffer(env, retailer.id, String(item.links?.[retailer.id] || ""));
+      const fallback = lookup.retailerMatches
+        .find((product) => product.stores[0]?.storeId === retailer.id)?.stores[0];
+      const store = linkedOffer ? offerToStore(linkedOffer) : fallback;
+      const effectivePrice = store?.price ?? null;
+      const normalizedPrice = normaliseForTarget(effectivePrice, store?.size, item.targetSize);
+      results.push({
+        storeId: retailer.id,
+        storeName: retailer.name,
+        status: store?.status || "catalogue-store-missing",
+        queryUrl: store?.url,
+        price: effectivePrice,
+        effectivePrice,
+        normalizedPrice,
+        lineTotal: normalizedPrice == null ? null : Number((normalizedPrice * quantity).toFixed(2)),
+        productName: store?.productName || null,
+        productUrl: store?.url || null,
+        regularPrice: store?.regularPrice ?? null,
+        savings: store?.regularPrice && effectivePrice != null ? Number((store.regularPrice - effectivePrice).toFixed(2)) : null,
+        promoText: store?.promoText,
+        promoApplied: store?.promoApplied,
+      });
+    }
+    const priced = results.filter((result) => result.effectivePrice != null).sort((left, right) => left.effectivePrice - right.effectivePrice);
+    scans.push({
+      itemId: String(item.id || crypto.randomUUID()),
+      name: String(item.name || query),
+      query,
+      quantity,
+      category: String(item.category || ""),
+      targetSize: String(item.targetSize || ""),
+      targetMeasure: item.targetSize ? { label: item.targetSize } : null,
+      results,
+      bestStoreId: priced[0]?.storeId || null,
+      bestStoreName: priced[0]?.storeName || null,
+      bestEffectivePrice: priced[0]?.effectivePrice ?? null,
+    });
+  }
+
+  const basketTotals: Record<string, { storeId: string; storeName: string; total: number; missing: number }> = {};
+  for (const retailer of enabledRetailers) {
+    let total = 0;
+    let missing = 0;
+    for (const scan of scans) {
+      const result = scan.results.find((entry) => entry.storeId === retailer.id);
+      if (!result || result.lineTotal == null) missing += 1;
+      else total += result.lineTotal;
+    }
+    basketTotals[retailer.id] = { storeId: retailer.id, storeName: retailer.name, total: Number(total.toFixed(2)), missing };
+  }
+  const bestBasket = Object.values(basketTotals).filter((entry) => entry.missing === 0).sort((left, right) => left.total - right.total)[0];
+  return json(request, env, {
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    source: "catalogue-cache",
+    scans,
+    basketTotals,
+    bestBasketStoreId: bestBasket?.storeId || null,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
@@ -333,6 +453,7 @@ export default {
     if (request.method === "GET" && ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)) return catalogueResponse(request, env, url);
     if (request.method === "GET" && ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(url.pathname)) return categoriesResponse(request, env);
     if (request.method === "POST" && ["/v1/catalogue/request", "/api/catalogue/request"].includes(url.pathname)) return queueRequest(request, env);
+    if (request.method === "POST" && ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)) return scanBasket(request, env);
     return json(request, env, { ok: false, error: "Not found" }, 404);
   },
 };
