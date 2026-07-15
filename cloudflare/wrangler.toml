@@ -5,6 +5,10 @@ compatibility_date = "2026-07-15"
 [vars]
 APP_ORIGIN = "https://www.randbasket.co.za"
 
+[[routes]]
+pattern = "api.randbasket.co.za"
+custom_domain = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "randbasket-catalogue"
