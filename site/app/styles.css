@@ -331,6 +331,19 @@ button:disabled {
   font-size: 1.03rem;
 }
 
+.catalogue-price .catalogue-unit-price {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.best-price-result .catalogue-unit-price {
+  color: #117a43;
+}
+
 .best-price-result .catalogue-price strong {
   color: #117a43;
   font-size: 1.12rem;
