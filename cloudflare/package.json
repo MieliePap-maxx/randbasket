@@ -1,0 +1,12 @@
+{
+  "name": "sa-grocery-price-checker-cloudflare-api",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute grocery-price-checker --file=schema.sql --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

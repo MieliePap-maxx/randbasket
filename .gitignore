@@ -1,0 +1,28 @@
+# Local data, imported retailer catalogues, browser sessions and logs.
+data/
+logs/
+
+# Dependencies and Expo build state.
+node_modules/
+mobile/node_modules/
+mobile/.expo/
+__pycache__/
+*.pyc
+
+# Local configuration and secrets. Keep the checked-in example files.
+.env
+.env.*
+!.env.example
+cloudflare/.dev.vars
+cloudflare/.dev.vars.*
+
+# Local release artefacts and operating-system clutter.
+*.zip
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Codex and local project tooling.
+.agents/
+.codex/

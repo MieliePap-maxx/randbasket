@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "SA Grocery Price Checker",
+    "slug": "sa-grocery-price-checker",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "sagrocery",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mieliepap.sagrocerypricechecker"
+    },
+    "android": {
+      "package": "com.mieliepap.sagrocerypricechecker"
+    }
+  }
+}
