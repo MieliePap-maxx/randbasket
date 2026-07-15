@@ -10,7 +10,7 @@
     <title>Compare grocery prices | RandBasket</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon.svg" />
-    <link rel="stylesheet" href="styles.css?v=7" />
+    <link rel="stylesheet" href="styles.css?v=8" />
   </head>
   <body>
     <header class="app-nav">
@@ -53,14 +53,6 @@
           <span>Tracked items</span>
           <strong id="itemCount">0</strong>
         </div>
-      </section>
-
-      <section class="phone-panel" aria-label="Phone access">
-        <div>
-          <span>Private by default</span>
-          <strong id="mobileUrl">Your basket stays on this device</strong>
-        </div>
-        <button class="ghost compact" id="copyMobileUrlBtn" type="button">Copy App Link</button>
       </section>
 
       <section class="catalogue-pane" id="compare" aria-label="Product price comparison">
@@ -124,10 +116,7 @@
       <section class="results-pane">
         <div class="pane-header">
           <h2>Latest Price Check</h2>
-          <div class="results-actions">
-            <button class="ghost compact" id="copyLinksBtn" type="button">Copy Direct Links</button>
-            <span id="scanStatus">Ready</span>
-          </div>
+          <div class="results-actions"><span id="scanStatus">Ready</span></div>
         </div>
         <div id="pnpProgress" class="scan-progress" hidden>
           <div class="progress-copy">
@@ -145,7 +134,7 @@
 
     <footer class="app-footer">
       <span>Built for South African baskets.</span>
-      <span><a href="mailto:randbasketzar@gmail.com">randbasketzar@gmail.com</a><a href="../privacy.html">Privacy</a><a href="../terms.html">Terms</a></span>
+      <span><a href="../support.html">Support</a><a href="../privacy.html">Privacy</a><a href="../terms.html">Terms</a></span>
     </footer>
 
     <dialog id="feedbackDialog" class="feedback-dialog" aria-labelledby="feedbackTitle">
@@ -185,6 +174,6 @@
       </form>
     </dialog>
 
-    <script src="app.js?v=14"></script>
+    <script src="app.js?v=15"></script>
   </body>
 </html>
