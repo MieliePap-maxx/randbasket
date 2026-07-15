@@ -4,7 +4,6 @@ const state = {
   stores: [],
   latest: null,
   pnpProgressTimer: null,
-  mobileUrl: "",
   catalogueResults: [],
   catalogueRetailerMatches: [],
   cataloguePage: 1,
@@ -167,7 +166,6 @@ function updateSummary() {
   const bestId = latest?.bestBasketStoreId;
   const best = bestId ? latest.basketTotals[bestId] : null;
   $("#bestBasket").textContent = best ? `${best.storeName} ${formatMoney(best.total)}` : "No scan yet";
-  $("#mobileUrl").textContent = "Your basket stays on this device";
 }
 
 function renderStores() {
@@ -413,7 +411,6 @@ function renderResults() {
   const wrap = $("#results");
   wrap.innerHTML = "";
   renderBasketTotals(state.latest);
-  $("#copyLinksBtn").disabled = !state.latest;
   if (!state.latest) {
     wrap.innerHTML = `<div class="empty">Run a scan to compare this week's shelf prices.</div>`;
     return;
@@ -470,50 +467,6 @@ function renderResults() {
     `;
     wrap.appendChild(card);
   });
-}
-
-function buildDirectLinksText() {
-  if (!state.latest) return "";
-  return state.latest.scans
-    .map((scan) => {
-      const links = scan.results
-        .map((result) => `${result.storeName}: ${result.queryUrl || result.productUrl || ""}`)
-        .join("\n");
-      return `${scan.name}\n${links}`;
-    })
-    .join("\n\n");
-}
-
-async function copyDirectLinks() {
-  const text = buildDirectLinksText();
-  if (!text) {
-    $("#scanStatus").textContent = "Run a scan first";
-    return;
-  }
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-  } else {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
-  }
-  $("#scanStatus").textContent = "Direct links copied";
-}
-
-async function copyMobileUrl() {
-  const appUrl = window.location.href;
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(appUrl);
-    $("#scanStatus").textContent = "App link copied";
-    return;
-  }
-  $("#scanStatus").textContent = appUrl;
 }
 
 function escapeHtml(value) {
@@ -646,8 +599,6 @@ function wireEvents() {
     await saveAll();
     $("#scanStatus").textContent = "Saved";
   });
-  $("#copyLinksBtn").addEventListener("click", copyDirectLinks);
-  $("#copyMobileUrlBtn").addEventListener("click", copyMobileUrl);
   $("#scanBtn").addEventListener("click", runScan);
   $("#feedbackOpenBtn").addEventListener("click", openFeedback);
   $("#feedbackCloseBtn").addEventListener("click", closeFeedback);
@@ -684,7 +635,6 @@ async function init() {
     stores: Object.fromEntries(defaultStores.map((store) => [store.id, true])),
   };
   state.stores = defaultStores;
-  state.mobileUrl = window.location.href;
   state.latest = saved.latest || null;
   renderStores();
   renderItems();
@@ -702,6 +652,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=14").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=15").catch(() => {});
   });
 }
