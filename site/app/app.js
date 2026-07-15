@@ -165,10 +165,17 @@ function renderCatalogueResults() {
   const retailerMatches = state.cataloguePage === 1 && state.catalogueRetailerMatches.length
     ? state.catalogueRetailerMatches
     : state.catalogueResults;
+  const seenMatches = new Set();
   const matches = retailerMatches
     .flatMap((product) => (product.stores || [])
       .filter((store) => store.price != null)
       .map((store) => ({ product, store })))
+    .filter(({ product, store }) => {
+      const key = `${store.storeId}|${store.url || product.id}|${store.price}`;
+      if (seenMatches.has(key)) return false;
+      seenMatches.add(key);
+      return true;
+    })
     .sort((left, right) => comparisonStoreOrder.indexOf(left.store.storeId) - comparisonStoreOrder.indexOf(right.store.storeId));
 
   if (!matches.length) {
@@ -558,7 +565,7 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=8").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=9").catch(() => {});
   });
 }
 
