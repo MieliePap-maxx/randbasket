@@ -264,6 +264,12 @@ function distanceKm(location: ShopperLocation | undefined, latitude: number | nu
   return Number((6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1));
 }
 
+function isOfferVisibleAtLocation(offer: OfferRow, location?: ShopperLocation) {
+  if (!offer.location_key || offer.location_key.startsWith("national")) return true;
+  const distance = distanceKm(location, offer.latitude, offer.longitude);
+  return distance != null && distance <= 120;
+}
+
 function offerToStore(offer: OfferRow, location?: ShopperLocation) {
   const price = offer.price_cents && offer.price_cents > 0 ? centsToPrice(offer.price_cents) : null;
   const normalizedPrice = offer.normalized_price_cents && offer.normalized_price_cents > 0
@@ -381,6 +387,7 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
     targetSize: product.target_size || undefined,
     searchTerms: parseJsonArray(product.search_terms_json),
     stores: (offerMap.get(product.id) || [])
+      .filter((offer) => isOfferVisibleAtLocation(offer, location))
       .map((offer) => offerToStore(offer, location))
       .sort((left, right) => (left.distanceKm ?? Number.POSITIVE_INFINITY) - (right.distanceKm ?? Number.POSITIVE_INFINITY)),
     score: Number(score.toFixed(3)),

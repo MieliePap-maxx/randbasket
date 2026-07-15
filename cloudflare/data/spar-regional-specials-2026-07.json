@@ -1,0 +1,131 @@
+{
+  "campaign": "20260708",
+  "validFrom": "8 July 2026",
+  "validTo": "21 July 2026",
+  "reviewedAt": "2026-07-16T00:50:00Z",
+  "regions": [
+    {
+      "key": "gauteng-hobart",
+      "storeCode": "5|80936|3",
+      "storeName": "Hobart SUPERSPAR, Bryanston",
+      "latitude": -26.062347,
+      "longitude": 28.026915,
+      "flipbook": 22276,
+      "items": [
+        {"id":"fresh-milk-2l","name":"SPAR Full Cream or Low Fat Fresh Milk 2 L","brand":"SPAR","category":"Dairy","size":"2 L","terms":["milk","full cream milk","fresh milk"],"priceCents":3499},
+        {"id":"selati-brown-sugar-2kg","name":"Selati Golden Brown Sugar 2 kg","brand":"Selati","category":"Pantry","size":"2 kg","terms":["sugar","brown sugar"],"priceCents":4299},
+        {"id":"flora-spread-500g","name":"Flora Regular or Light Fat Spread 500 g","brand":"Flora","category":"Dairy","size":"500 g","terms":["margarine","spread"],"priceCents":3799},
+        {"id":"huggies-dry-comfort-value-pack","name":"Huggies Dry Comfort Value Pack Nappies","brand":"Huggies","category":"Baby","size":"value pack","terms":["nappies","diapers"],"priceCents":14899},
+        {"id":"toilet-tissue-9","name":"SPAR Toilet Tissue 2 Ply 9 Rolls","brand":"SPAR","category":"Cleaning & Household","size":"9 rolls","terms":["toilet paper","toilet tissue"],"priceCents":6499},
+        {"id":"bulk-pork-pack","name":"Bulk Pork Pack","category":"Meat","size":"1 kg","unit":"per kg","terms":["pork","pork pack"],"priceCents":6999},
+        {"id":"blue-ribbon-white-bread-700g","name":"Blue Ribbon Classic White Sliced Bread 700 g","brand":"Blue Ribbon","category":"Bakery","size":"700 g","terms":["bread","white bread"],"priceCents":1799},
+        {"id":"sweet-potatoes-1kg","name":"SPAR Freshline Sweet Potatoes 1 kg","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"1 kg","terms":["sweet potatoes","vegetables"],"priceCents":1999},
+        {"id":"bananas-500g","name":"SPAR Freshline Banana Snack Pack 500 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"500 g","terms":["bananas","fruit"],"priceCents":1099},
+        {"id":"chicken-fillet","name":"Your Butcher by SPAR Chicken Fillet","category":"Meat","size":"1 kg","unit":"per kg","terms":["chicken","chicken fillet","chicken breast"],"priceCents":7999},
+        {"id":"chicken-wings","name":"SPAR Tender and Tasty Skewered Chicken Wings","category":"Meat","size":"1 kg","unit":"per kg","terms":["chicken","chicken wings"],"priceCents":8999},
+        {"id":"extra-large-eggs-18","name":"SPAR Extra Large Eggs 18 Pack","brand":"SPAR","category":"Dairy","size":"18 pack","terms":["eggs","large eggs"],"priceCents":5299},
+        {"id":"dlite-spread-1kg","name":"D'lite 37% Fat Spread 1 kg","brand":"D'lite","category":"Dairy","size":"1 kg","terms":["margarine","spread"],"priceCents":3499},
+        {"id":"hot-doggers-1kg","name":"SPAR Hot Doggers Viennas 1 kg","brand":"SPAR","category":"Meat","size":"1 kg","terms":["viennas","sausages","hot dogs"],"priceCents":7499},
+        {"id":"feta-400g","name":"SPAR Feta Cheese 400 g","brand":"SPAR","category":"Dairy","size":"400 g","terms":["cheese","feta"],"priceCents":6499},
+        {"id":"lancewood-yoghurt-1kg","name":"Lancewood Double Cream Yoghurt 1 kg","brand":"Lancewood","category":"Dairy","size":"1 kg","terms":["yoghurt","double cream yoghurt"],"priceCents":4699},
+        {"id":"nutriday-yoghurt-900g","name":"Danone Nutriday Yoghurt 900 g","brand":"Danone","category":"Dairy","size":"900 g","terms":["yoghurt","plain yoghurt"],"priceCents":3499},
+        {"id":"frozen-vegetables-900g","name":"Nature's Garden Frozen Vegetable Mix 900 g","brand":"Nature's Garden","category":"Frozen","size":"900 g","terms":["frozen vegetables","vegetables"],"priceCents":3999},
+        {"id":"mccain-chips-1kg","name":"McCain Frozen Chips 1 kg","brand":"McCain","category":"Frozen","size":"1 kg","terms":["frozen chips","chips"],"priceCents":4699}
+      ]
+    },
+    {
+      "key": "western-cape-sea-point",
+      "storeCode": "6|35807|2",
+      "storeName": "Sea Point SPAR",
+      "latitude": -33.9217,
+      "longitude": 18.3811,
+      "flipbook": 22259,
+      "items": [
+        {"id":"nescafe-coffee-200-230g","name":"Nescafe Classic Coffee 200 g or Refill 230 g","brand":"Nescafe","category":"Beverages","size":"200 g / 230 g","terms":["coffee","instant coffee"],"priceCents":11999},
+        {"id":"fresh-milk-2l","name":"SPAR Full Cream or Low Fat Fresh Milk 2 L","brand":"SPAR","category":"Dairy","size":"2 L","terms":["milk","full cream milk","fresh milk"],"priceCents":3299},
+        {"id":"black-cat-peanut-butter-400g","name":"Black Cat Peanut Butter 400 g","brand":"Black Cat","category":"Pantry","size":"400 g","terms":["peanut butter"],"priceCents":3699},
+        {"id":"large-eggs-18","name":"SPAR Large Eggs 18 Pack","brand":"SPAR","category":"Dairy","size":"18 pack","terms":["eggs","large eggs"],"priceCents":3999},
+        {"id":"chicken-viennas-500g","name":"SPAR Chicken Viennas 500 g","brand":"SPAR","category":"Meat","size":"500 g","terms":["viennas","chicken viennas","sausages"],"priceCents":5499},
+        {"id":"pilchards-400g","name":"SPAR Pilchards in Tomato or Chilli Sauce 400 g","brand":"SPAR","category":"Pantry","size":"400 g","terms":["pilchards","canned fish"],"priceCents":2199},
+        {"id":"chicken-braai-pack","name":"Your Butcher by SPAR Fresh Chicken Braai Pack","category":"Meat","size":"1 kg","unit":"per kg","terms":["chicken","braai pack"],"priceCents":6499},
+        {"id":"snowflake-cake-flour-2-5kg","name":"Snowflake Cake Wheat Flour 2.5 kg","brand":"Snowflake","category":"Pantry","size":"2.5 kg","terms":["flour","cake flour"],"priceCents":3299},
+        {"id":"huggies-gold-jumbo-pack","name":"Huggies Gold Nappies Jumbo Pack","brand":"Huggies","category":"Baby","size":"jumbo pack","terms":["nappies","diapers"],"priceCents":23999},
+        {"id":"beef-shin","name":"Your Butcher by SPAR Beef Shin Bone-In","category":"Meat","size":"1 kg","unit":"per kg","terms":["beef","beef shin"],"priceCents":9999},
+        {"id":"boerewors","name":"Your Butcher by SPAR Oukrans Boerewors","category":"Meat","size":"1 kg","unit":"per kg","terms":["boerewors","sausage"],"priceCents":11999},
+        {"id":"albany-white-bread-700g","name":"Albany Everyday White Bread 700 g","brand":"Albany","category":"Bakery","size":"700 g","terms":["bread","white bread"],"priceCents":1799}
+      ]
+    },
+    {
+      "key": "kwazulu-natal-umhlanga",
+      "storeCode": "2|11134|3",
+      "storeName": "Umhlanga SUPERSPAR",
+      "latitude": -29.7262,
+      "longitude": 31.0834,
+      "flipbook": 22266,
+      "items": [
+        {"id":"fresh-milk-2l","name":"SPAR Full Cream or Low Fat Fresh Milk 2 L","brand":"SPAR","category":"Dairy","size":"2 L","terms":["milk","full cream milk","fresh milk"],"priceCents":3199},
+        {"id":"brown-bread-700g","name":"BB or SPAR Brown Sliced Bread 700 g","brand":"SPAR","category":"Bakery","size":"700 g","terms":["bread","brown bread"],"priceCents":1599},
+        {"id":"flora-spread-500g","name":"Flora Regular or Light Fat Spread 500 g","brand":"Flora","category":"Dairy","size":"500 g","terms":["margarine","spread"],"priceCents":3599},
+        {"id":"sunflower-oil-2l","name":"SPAR Sunflower Oil 2 L","brand":"SPAR","category":"Pantry","size":"2 L","terms":["cooking oil","sunflower oil","oil"],"priceCents":6999},
+        {"id":"coca-cola-2x1-5l","name":"Coca-Cola Soft Drink 2 x 1.5 L","brand":"Coca-Cola","category":"Beverages","size":"2 x 1.5 L","terms":["cooldrink","soft drink","coke"],"priceCents":3400},
+        {"id":"sunlight-laundry-2kg","name":"Sunlight Laundry Detergent 2 kg","brand":"Sunlight","category":"Cleaning & Household","size":"2 kg","terms":["washing powder","laundry detergent"],"priceCents":5999},
+        {"id":"spatchcock-chicken","name":"Mountain Valley Spatchcock Chicken","brand":"Mountain Valley","category":"Meat","size":"1 kg","unit":"per kg","terms":["chicken","whole chicken","spatchcock chicken"],"priceCents":6999},
+        {"id":"beef-steak","name":"Your Butcher by SPAR Beef Sirloin or Rump Steak","category":"Meat","size":"1 kg","unit":"per kg","terms":["beef","steak","rump steak","sirloin steak"],"priceCents":14999},
+        {"id":"boerewors","name":"SPAR Boerewors","category":"Meat","size":"1 kg","unit":"per kg","terms":["boerewors","sausage"],"priceCents":10999},
+        {"id":"chicken-breast-fillet","name":"Mountain Valley Skinless Chicken Breast Fillets","brand":"Mountain Valley","category":"Meat","size":"1 kg","unit":"per kg","terms":["chicken","chicken breast","chicken fillet"],"priceCents":7499},
+        {"id":"potatoes-2kg","name":"SPAR Freshline Potatoes 2 kg","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"2 kg","terms":["potatoes","vegetables"],"priceCents":2999},
+        {"id":"onions-2kg","name":"SPAR Freshline Onions 2 kg","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"2 kg","terms":["onions","vegetables"],"priceCents":4499},
+        {"id":"bananas-750g","name":"SPAR Freshline Bananas 750 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"750 g","terms":["bananas","fruit"],"priceCents":1499},
+        {"id":"apples-1-5kg","name":"SPAR Freshline Golden Delicious Apples 1.5 kg","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"1.5 kg","terms":["apples","fruit"],"priceCents":2999}
+      ]
+    },
+    {
+      "key": "free-state-bloemfontein",
+      "storeCode": "5|80703|1",
+      "storeName": "Preller Plein KWIKSPAR, Bloemfontein",
+      "latitude": -29.0879691,
+      "longitude": 26.2105643,
+      "flipbook": 22280,
+      "items": [
+        {"id":"fresh-milk-2l","name":"SPAR Full Cream or Low Fat Fresh Milk 2 L","brand":"SPAR","category":"Dairy","size":"2 L","terms":["milk","full cream milk","fresh milk"],"priceCents":3499},
+        {"id":"chicken-fillet","name":"Your Butcher by SPAR Chicken Fillet","category":"Meat","size":"1 kg","unit":"per kg","terms":["chicken","chicken fillet","chicken breast"],"priceCents":7999},
+        {"id":"pork-belly","name":"Your Butcher by SPAR Pork Belly Roast","category":"Meat","size":"1 kg","unit":"per kg","terms":["pork","pork belly"],"priceCents":11999},
+        {"id":"potjie-pack-1kg","name":"SPAR Freshline Potjie Pack 1 kg","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"1 kg","terms":["potjie vegetables","vegetables"],"priceCents":3999},
+        {"id":"pita-bread-6","name":"SPAR Bakery Pita Bread 6 Pack","brand":"SPAR Bakery","category":"Bakery","size":"6 pack","terms":["bread","pita bread"],"priceCents":3999},
+        {"id":"rib-eye-roast","name":"SPAR Tender and Tasty Rib Eye Roast","category":"Meat","size":"1 kg","unit":"per kg","terms":["beef","rib eye","roast"],"priceCents":15999},
+        {"id":"blue-ribbon-white-bread-700g","name":"Blue Ribbon Classic White Sliced Bread 700 g","brand":"Blue Ribbon","category":"Bakery","size":"700 g","terms":["bread","white bread"],"priceCents":1799},
+        {"id":"bananas-500g","name":"SPAR Freshline Banana Snack Pack 500 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"500 g","terms":["bananas","fruit"],"priceCents":1099},
+        {"id":"hot-doggers-1kg","name":"SPAR Hot Doggers Viennas 1 kg","brand":"SPAR","category":"Meat","size":"1 kg","terms":["viennas","sausages","hot dogs"],"priceCents":7499},
+        {"id":"chicken-viennas-500g","name":"SPAR Chicken Viennas 500 g","brand":"SPAR","category":"Meat","size":"500 g","terms":["viennas","chicken viennas","sausages"],"priceCents":5499},
+        {"id":"cheese-200g","name":"SPAR Cheddar or Gouda Cheese 200 g","brand":"SPAR","category":"Dairy","size":"200 g","terms":["cheese","cheddar","gouda"],"priceCents":2999},
+        {"id":"nutriday-yoghurt-900g","name":"Danone Nutriday Yoghurt 900 g","brand":"Danone","category":"Dairy","size":"900 g","terms":["yoghurt","plain yoghurt"],"priceCents":3499},
+        {"id":"extra-large-eggs-18","name":"SPAR Extra Large Eggs 18 Pack","brand":"SPAR","category":"Dairy","size":"18 pack","terms":["eggs","large eggs"],"priceCents":5299},
+        {"id":"frozen-chicken-4kg","name":"SPAR Frozen Mixed Chicken Portions 4 kg","brand":"SPAR","category":"Meat","size":"4 kg","terms":["chicken","frozen chicken","chicken portions"],"priceCents":16999}
+      ]
+    },
+    {
+      "key": "mpumalanga-mbombela",
+      "storeCode": "8|60073|3",
+      "storeName": "Riverside SUPERSPAR, Mbombela",
+      "latitude": -25.05593,
+      "longitude": 30.46462,
+      "flipbook": 22249,
+      "items": [
+        {"id":"fresh-milk-2l","name":"SPAR Full Cream or Low Fat Fresh Milk 2 L","brand":"SPAR","category":"Dairy","size":"2 L","terms":["milk","full cream milk","fresh milk"],"priceCents":3199},
+        {"id":"salted-butter-500g","name":"SPAR Choice Salted Butter 500 g","brand":"SPAR","category":"Dairy","size":"500 g","terms":["butter","salted butter"],"priceCents":6999},
+        {"id":"frozen-chicken-4kg","name":"SPAR Frozen Mixed Chicken Portions 4 kg","brand":"SPAR","category":"Meat","size":"4 kg","terms":["chicken","frozen chicken","chicken portions"],"priceCents":16999},
+        {"id":"chicken-viennas-500g","name":"SPAR Chicken Viennas 500 g","brand":"SPAR","category":"Meat","size":"500 g","terms":["viennas","chicken viennas","sausages"],"priceCents":5499},
+        {"id":"smoked-viennas-500g","name":"SPAR Beechwood Smoked Viennas 500 g","brand":"SPAR","category":"Meat","size":"500 g","terms":["viennas","sausages"],"priceCents":5499},
+        {"id":"black-cat-peanut-butter-400g","name":"Black Cat Peanut Butter 400 g","brand":"Black Cat","category":"Pantry","size":"400 g","terms":["peanut butter"],"priceCents":3699},
+        {"id":"soft-drink-2x2l","name":"SPAR Carbonated Soft Drink 2 x 2 L","brand":"SPAR","category":"Beverages","size":"2 x 2 L","terms":["cooldrink","soft drink"],"priceCents":2400},
+        {"id":"white-mushrooms-250g","name":"SPAR Freshline White Button Mushrooms 250 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"250 g","terms":["mushrooms","vegetables"],"priceCents":2999},
+        {"id":"brown-mushrooms-250g","name":"SPAR Freshline Brown Mushrooms 250 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"250 g","terms":["mushrooms","vegetables"],"priceCents":3299},
+        {"id":"apples-1kg","name":"SPAR Freshline Apples 1 kg","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"1 kg","terms":["apples","fruit"],"priceCents":1699},
+        {"id":"diced-butternut-500g","name":"SPAR Freshline Diced Butternut 500 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"500 g","terms":["butternut","vegetables"],"priceCents":2699},
+        {"id":"diced-sweet-potato-500g","name":"SPAR Freshline Diced Sweet Potato 500 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"500 g","terms":["sweet potatoes","vegetables"],"priceCents":2699},
+        {"id":"diced-pumpkin-500g","name":"SPAR Freshline Diced Pumpkin 500 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"500 g","terms":["pumpkin","vegetables"],"priceCents":2499},
+        {"id":"bananas-750g","name":"SPAR Freshline Bananas 750 g","brand":"SPAR Freshline","category":"Fruit & Vegetables","size":"750 g","terms":["bananas","fruit"],"priceCents":1999}
+      ]
+    }
+  ]
+}
