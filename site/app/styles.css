@@ -139,7 +139,6 @@ a {
 .basket-totals,
 .result-head,
 .price-row,
-.phone-panel,
 .progress-copy {
   display: flex;
 }
@@ -340,8 +339,7 @@ button:disabled {
 .summary-panel,
 .settings-pane,
 .basket-pane,
-.results-pane,
-.phone-panel {
+.results-pane {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel);
@@ -354,15 +352,13 @@ button:disabled {
 }
 
 .summary-panel span,
-.phone-panel span,
 .results-pane .pane-header span {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 800;
 }
 
-.summary-panel strong,
-.phone-panel strong {
+.summary-panel strong {
   display: block;
   margin-top: 8px;
   font-size: 1.28rem;
@@ -587,21 +583,6 @@ button:disabled {
   .catalogue-results {
     grid-template-columns: 1fr;
   }
-}
-
-.phone-panel {
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 18px;
-  padding: 16px 20px;
-  background: linear-gradient(90deg, #fff, #f3f8f4);
-}
-
-.phone-panel strong {
-  color: var(--green-dark);
-  font-size: 0.98rem;
-  overflow-wrap: anywhere;
 }
 
 .workspace {
@@ -1182,9 +1163,6 @@ td.remove {
     grid-template-columns: 1fr;
   }
 
-  .phone-panel {
-    display: grid;
-  }
 }
 
 @media (max-width: 680px) {
@@ -1245,8 +1223,7 @@ td.remove {
   .settings-pane,
   .basket-pane,
   .results-pane,
-  .summary-panel,
-  .phone-panel {
+  .summary-panel {
     padding: 14px;
   }
 
@@ -1305,8 +1282,7 @@ td.remove {
     display: grid;
   }
 
-  .results-actions button,
-  .phone-panel button {
+  .results-actions button {
     width: 100%;
   }
 
@@ -1383,4 +1359,3 @@ td.remove {
     display: none;
   }
 }
-
