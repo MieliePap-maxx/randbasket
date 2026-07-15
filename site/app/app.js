@@ -13,6 +13,7 @@ const state = {
 
 const API_ORIGIN = "https://api.randbasket.co.za";
 const STORAGE_KEY = "randbasket-web-state-v1";
+const FEEDBACK_EMAIL = "randbasketzar@gmail.com";
 const defaultStores = [
   { id: "pick-n-pay", name: "Pick n Pay" },
   { id: "checkers", name: "Checkers" },
@@ -598,6 +599,48 @@ function addItem() {
   $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
 }
 
+function openFeedback() {
+  const dialog = $("#feedbackDialog");
+  $("#feedbackContext").value = `${window.location.origin}${window.location.pathname}`;
+  $("#feedbackStatus").innerHTML = `Prefer email? <a href="mailto:${FEEDBACK_EMAIL}">${FEEDBACK_EMAIL}</a>`;
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeFeedback() {
+  const dialog = $("#feedbackDialog");
+  if (dialog.open) dialog.close();
+}
+
+async function submitFeedback(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("#feedbackSubmitBtn");
+  const status = $("#feedbackStatus");
+  button.disabled = true;
+  button.textContent = "Sending...";
+  status.textContent = "Sending your suggestion to RandBasket...";
+  try {
+    const fields = Object.fromEntries(new FormData(form).entries());
+    const response = await fetch(form.action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(fields),
+    });
+    if (!response.ok) throw new Error("Suggestion service unavailable");
+    form.reset();
+    status.textContent = "Thank you â€” your suggestion has been sent.";
+    button.textContent = "Sent";
+    window.setTimeout(() => {
+      button.textContent = "Send another suggestion";
+      button.disabled = false;
+    }, 1400);
+  } catch {
+    status.innerHTML = `We could not send that just now. Please email <a href="mailto:${FEEDBACK_EMAIL}">${FEEDBACK_EMAIL}</a>.`;
+    button.textContent = "Try again";
+    button.disabled = false;
+  }
+}
+
 function wireEvents() {
   $("#addItemBtn").addEventListener("click", addItem);
   $("#saveBtn").addEventListener("click", async () => {
@@ -608,6 +651,12 @@ function wireEvents() {
   $("#copyLinksBtn").addEventListener("click", copyDirectLinks);
   $("#copyMobileUrlBtn").addEventListener("click", copyMobileUrl);
   $("#scanBtn").addEventListener("click", runScan);
+  $("#feedbackOpenBtn").addEventListener("click", openFeedback);
+  $("#feedbackCloseBtn").addEventListener("click", closeFeedback);
+  $("#feedbackForm").addEventListener("submit", submitFeedback);
+  $("#feedbackDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeFeedback();
+  });
   $("#catalogueSearchBtn").addEventListener("click", () => searchCatalogue(1));
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchCatalogue(1);
@@ -644,6 +693,7 @@ async function init() {
   renderResults();
   updateSummary();
   wireEvents();
+  if (window.location.hash === "#suggestions") openFeedback();
 }
 
 init().catch((error) => {
@@ -652,7 +702,7 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=10").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=11").catch(() => {});
   });
 }
 
