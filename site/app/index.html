@@ -10,19 +10,37 @@
     <title>Compare grocery prices | RandBasket</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon.svg" />
-    <link rel="stylesheet" href="styles.css?v=6" />
+    <link rel="stylesheet" href="styles.css?v=7" />
   </head>
   <body>
+    <header class="app-nav">
+      <a class="app-brand" href="../" aria-label="RandBasket home">
+        <img src="icon.svg" alt="" />
+        <span><strong>RandBasket</strong><small>Compare. Save. Shop smarter.</small></span>
+      </a>
+      <nav class="app-nav-links" aria-label="App navigation">
+        <a href="#compare">Compare</a>
+        <a href="#basket">My basket</a>
+        <button id="feedbackOpenBtn" class="feedback-nav-btn" type="button">Suggestions</button>
+      </nav>
+    </header>
+
     <main class="app-shell">
       <section class="topbar">
-        <div>
-          <p class="eyebrow"><a href="../">RandBasket</a> grocery comparison</p>
-          <h1>Compare your basket</h1>
-          <p class="subhead">Compare Pick n Pay, Checkers, and Woolworths from one basket.</p>
+        <div class="hero-copy">
+          <p class="eyebrow">Smarter grocery shopping</p>
+          <h1>More groceries.<br /><em>Less guesswork.</em></h1>
+          <p class="subhead">Compare real products, pack sizes, and unit prices across Pick n Pay, Checkers, and Woolworths.</p>
+          <div class="actions">
+            <a class="hero-cta" href="#compare">Start comparing</a>
+            <button class="hero-secondary" id="saveBtn" type="button">Save basket</button>
+            <button class="hero-secondary" id="scanBtn" type="button">Scan prices</button>
+          </div>
         </div>
-        <div class="actions">
-          <button class="ghost" id="saveBtn" type="button">Save Basket</button>
-          <button class="primary" id="scanBtn" type="button">Scan Prices</button>
+        <div class="hero-proof" aria-label="RandBasket benefits">
+          <div><strong>3</strong><span>major retailers</span></div>
+          <div><strong>R/kg</strong><span>fair unit pricing</span></div>
+          <div><strong>Private</strong><span>basket stays here</span></div>
         </div>
       </section>
 
@@ -45,7 +63,7 @@
         <button class="ghost compact" id="copyMobileUrlBtn" type="button">Copy App Link</button>
       </section>
 
-      <section class="catalogue-pane" aria-label="Product price comparison">
+      <section class="catalogue-pane" id="compare" aria-label="Product price comparison">
         <div class="pane-header">
           <div>
             <h2>Compare a product</h2>
@@ -81,7 +99,7 @@
           <div class="source-note" id="sourceNote"></div>
         </aside>
 
-        <section class="basket-pane">
+        <section class="basket-pane" id="basket">
           <div class="pane-header">
             <h2>Basket</h2>
             <button class="ghost compact" id="addItemBtn" type="button">Find an item</button>
@@ -125,7 +143,52 @@
       </section>
     </main>
 
-    <script src="app.js?v=10"></script>
+    <footer class="app-footer">
+      <span>Built for South African baskets.</span>
+      <span><a href="mailto:randbasketzar@gmail.com">randbasketzar@gmail.com</a><a href="../privacy.html">Privacy</a><a href="../terms.html">Terms</a></span>
+    </footer>
+
+    <dialog id="feedbackDialog" class="feedback-dialog" aria-labelledby="feedbackTitle">
+      <form id="feedbackForm" class="feedback-card" action="https://formsubmit.co/ajax/randbasketzar@gmail.com" method="POST">
+        <div class="feedback-head">
+          <div>
+            <p class="eyebrow">Help shape RandBasket</p>
+            <h2 id="feedbackTitle">What should we improve?</h2>
+            <p>Ideas, corrections, confusing bitsâ€”send them all. Every message reaches the RandBasket team.</p>
+          </div>
+          <button id="feedbackCloseBtn" class="dialog-close" type="button" aria-label="Close suggestions">Ã—</button>
+        </div>
+
+        <input type="hidden" name="_subject" value="New RandBasket suggestion" />
+        <input type="hidden" name="_template" value="table" />
+        <input type="hidden" name="_captcha" value="false" />
+        <input id="feedbackContext" type="hidden" name="page" value="RandBasket web app" />
+        <label class="feedback-honey" aria-hidden="true" hidden>Leave this empty<input type="text" name="_honey" tabindex="-1" autocomplete="off" /></label>
+
+        <div class="feedback-grid">
+          <label>Your name <span>optional</span><input name="name" type="text" autocomplete="name" placeholder="How should we address you?" /></label>
+          <label>Your email <span>optional</span><input name="email" type="email" autocomplete="email" placeholder="So we can reply" /></label>
+        </div>
+        <label>What is this about?
+          <select name="feedback_type" required>
+            <option value="Feature idea">A feature idea</option>
+            <option value="Website improvement">Website improvement</option>
+            <option value="Price or product correction">Price or product correction</option>
+            <option value="Problem or bug">Something is not working</option>
+            <option value="Other">Something else</option>
+          </select>
+        </label>
+        <label>Your suggestion
+          <textarea name="message" rows="6" required minlength="5" placeholder="Tell us what would make RandBasket better for you..."></textarea>
+        </label>
+        <div class="feedback-actions">
+          <p id="feedbackStatus" aria-live="polite">Prefer email? <a href="mailto:randbasketzar@gmail.com">randbasketzar@gmail.com</a></p>
+          <button id="feedbackSubmitBtn" class="feedback-submit" type="submit">Send suggestion</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js?v=11"></script>
   </body>
 </html>
 
