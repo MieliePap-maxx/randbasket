@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#124536" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="RandBasket" />
+    <meta name="description" content="Compare a grocery basket across Pick n Pay, Checkers and Woolworths." />
+    <title>Compare grocery prices | RandBasket</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="stylesheet" href="styles.css?v=4" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar">
+        <div>
+          <p class="eyebrow"><a href="../">RandBasket</a> grocery comparison</p>
+          <h1>Compare your basket</h1>
+          <p class="subhead">Compare Pick n Pay, Checkers, and Woolworths from one basket.</p>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="saveBtn" type="button">Save Basket</button>
+          <button class="primary" id="scanBtn" type="button">Scan Prices</button>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="Basket summary">
+        <div class="summary-panel">
+          <span>Best full basket</span>
+          <strong id="bestBasket">No scan yet</strong>
+        </div>
+        <div class="summary-panel">
+          <span>Tracked items</span>
+          <strong id="itemCount">0</strong>
+        </div>
+      </section>
+
+      <section class="phone-panel" aria-label="Phone access">
+        <div>
+          <span>Private by default</span>
+          <strong id="mobileUrl">Your basket stays on this device</strong>
+        </div>
+        <button class="ghost compact" id="copyMobileUrlBtn" type="button">Copy App Link</button>
+      </section>
+
+      <section class="catalogue-pane" aria-label="Product price comparison">
+        <div class="pane-header">
+          <div>
+            <h2>Compare a product</h2>
+            <p class="catalogue-subhead">See the closest Pick n Pay, Checkers, and Woolworths matches together.</p>
+          </div>
+          <button class="primary compact" id="catalogueSearchBtn" type="button">Search</button>
+        </div>
+        <div class="catalogue-search-row">
+          <input id="catalogueSearchInput" type="search" autocomplete="off" placeholder="Search Full Cream Milk 2L, bacon, toothpaste..." />
+        </div>
+        <div id="catalogueStatus" class="catalogue-status" aria-live="polite"></div>
+        <div id="catalogueResults" class="catalogue-results"></div>
+        <div id="cataloguePagination" class="catalogue-pagination" hidden>
+          <button class="ghost compact" id="cataloguePreviousBtn" type="button">Previous</button>
+          <span id="cataloguePageLabel">Page 1</span>
+          <button class="ghost compact" id="catalogueMoreBtn" type="button">More matches</button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="settings-pane">
+          <div class="pane-header">
+            <h2>Value Settings</h2>
+          </div>
+          <label>
+            Product matches per store
+            <input id="maxResultsInput" type="number" min="1" max="12" step="1" />
+          </label>
+          <fieldset>
+            <legend>Stores to check</legend>
+            <div id="storeToggles" class="store-toggles"></div>
+          </fieldset>
+          <div class="source-note" id="sourceNote"></div>
+        </aside>
+
+        <section class="basket-pane">
+          <div class="pane-header">
+            <h2>Basket</h2>
+            <button class="ghost compact" id="addItemBtn" type="button">Add Item</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Search phrase</th>
+                  <th>Target size</th>
+                  <th>Qty</th>
+                  <th>Category</th>
+                  <th>Pick n Pay URL</th>
+                  <th>Checkers URL</th>
+                  <th>Woolworths URL</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="itemsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="results-pane">
+        <div class="pane-header">
+          <h2>Latest Price Check</h2>
+          <div class="results-actions">
+            <button class="ghost compact" id="copyLinksBtn" type="button">Copy Direct Links</button>
+            <span id="scanStatus">Ready</span>
+          </div>
+        </div>
+        <div id="pnpProgress" class="scan-progress" hidden>
+          <div class="progress-copy">
+            <strong id="pnpProgressLabel">Pick n Pay scan</strong>
+            <span id="pnpProgressPercent">0%</span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div id="pnpProgressBar" class="progress-fill"></div>
+          </div>
+        </div>
+        <div id="basketTotals" class="basket-totals"></div>
+        <div id="results" class="results-grid"></div>
+      </section>
+    </main>
+
+    <script src="app.js?v=4"></script>
+  </body>
+</html>
+
