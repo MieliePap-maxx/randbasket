@@ -1,4 +1,4 @@
-name = "sa-grocery-price-checker-api"
+name = "randbasket-api"
 main = "src/index.ts"
 compatibility_date = "2026-07-15"
 
@@ -7,9 +7,5 @@ APP_ORIGIN = "https://www.randbasket.co.za"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "grocery-price-checker"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
-
-[[r2_buckets]]
-binding = "CATALOGUE"
-bucket_name = "grocery-catalogue-production"
+database_name = "randbasket-catalogue"
+database_id = "494cfdd0-f4e7-4217-92b1-53283c64e826"
