@@ -4,6 +4,13 @@ compatibility_date = "2026-07-15"
 
 [vars]
 APP_ORIGIN = "https://www.randbasket.co.za"
+FEEDBACK_FROM = "feedback@randbasket.co.za"
+FEEDBACK_TO = "randbasketzar@gmail.com"
+
+[[send_email]]
+name = "FEEDBACK_EMAIL"
+destination_address = "randbasketzar@gmail.com"
+allowed_sender_addresses = ["feedback@randbasket.co.za"]
 
 [[routes]]
 pattern = "api.randbasket.co.za"
