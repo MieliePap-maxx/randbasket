@@ -92,6 +92,72 @@ function cleanDisplayText(value) {
 
 const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths"];
 
+const measurementUnits = {
+  mg: { dimension: "mass", baseMultiplier: 0.001, comparisonAmount: 1000, comparisonUnit: "kg" },
+  g: { dimension: "mass", baseMultiplier: 1, comparisonAmount: 1000, comparisonUnit: "kg" },
+  kg: { dimension: "mass", baseMultiplier: 1000, comparisonAmount: 1000, comparisonUnit: "kg" },
+  ml: { dimension: "volume", baseMultiplier: 1, comparisonAmount: 1000, comparisonUnit: "L" },
+  l: { dimension: "volume", baseMultiplier: 1000, comparisonAmount: 1000, comparisonUnit: "L" },
+};
+
+function normaliseMeasurementUnit(unit) {
+  const value = String(unit || "").toLowerCase();
+  if (value.startsWith("kilo")) return "kg";
+  if (value.startsWith("milli") && value.includes("lit")) return "ml";
+  if (value.startsWith("lit")) return "l";
+  if (value.startsWith("milli") && value.includes("gram")) return "mg";
+  if (value.startsWith("gram")) return "g";
+  return value;
+}
+
+function parseMeasurement(...values) {
+  const text = cleanDisplayText(values.filter(Boolean).join(" "))
+    .toLowerCase()
+    .replaceAll(",", ".");
+  const unitPattern = "kg|kilograms?|g|grams?|mg|milligrams?|l|litres?|liters?|ml|millilitres?|milliliters?";
+  const multipack = text.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*[x\\u00d7]\\s*(\\d+(?:\\.\\d+)?)\\s*(${unitPattern})\\b`, "i"));
+  const single = text.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(${unitPattern})\\b`, "i"));
+  const perUnit = text.match(new RegExp(`\\bper\\s+(${unitPattern})\\b`, "i"));
+
+  if (multipack || single || perUnit) {
+    const amount = multipack ? Number(multipack[1]) * Number(multipack[2]) : single ? Number(single[1]) : 1;
+    const unit = normaliseMeasurementUnit((multipack || single || perUnit)[multipack ? 3 : single ? 2 : 1]);
+    const definition = measurementUnits[unit];
+    if (definition && amount > 0) {
+      return {
+        dimension: definition.dimension,
+        baseAmount: amount * definition.baseMultiplier,
+        comparisonAmount: definition.comparisonAmount,
+        comparisonUnit: definition.comparisonUnit,
+      };
+    }
+  }
+
+  const count = text.match(/(?:pack\s+of\s+)?(\d+(?:\.\d+)?)\s*(?:ea|each|pack|pk|pieces?|count|ct|units?)\b/i);
+  if (count && Number(count[1]) > 0) {
+    return {
+      dimension: "count",
+      baseAmount: Number(count[1]),
+      comparisonAmount: 1,
+      comparisonUnit: "item",
+    };
+  }
+  if (/\bdozen\b/i.test(text)) {
+    return { dimension: "count", baseAmount: 12, comparisonAmount: 1, comparisonUnit: "item" };
+  }
+  return null;
+}
+
+function getUnitComparison(product, store) {
+  const measurement = parseMeasurement(store.size, store.productName, product.canonicalName);
+  const price = Number(store.price);
+  if (!measurement || !Number.isFinite(price)) return null;
+  return {
+    ...measurement,
+    unitPrice: (price * measurement.comparisonAmount) / measurement.baseAmount,
+  };
+}
+
 function updateSummary() {
   $("#itemCount").textContent = state.items.length;
   $("#maxResultsInput").value = state.settings.maxResultsPerStore || 6;
@@ -169,7 +235,7 @@ function renderCatalogueResults() {
   const matches = retailerMatches
     .flatMap((product) => (product.stores || [])
       .filter((store) => store.price != null)
-      .map((store) => ({ product, store })))
+      .map((store) => ({ product, store, comparison: getUnitComparison(product, store) })))
     .filter(({ product, store }) => {
       const key = `${store.storeId}|${store.url || product.id}|${store.price}`;
       if (seenMatches.has(key)) return false;
@@ -183,26 +249,47 @@ function renderCatalogueResults() {
     return;
   }
 
-  const rankedPrices = [...new Set(matches.map(({ store }) => Number(store.price)).filter(Number.isFinite))]
-    .sort((left, right) => left - right);
-  const bestPrice = rankedPrices[0];
-  const nextPrice = rankedPrices.find((price) => price > bestPrice);
+  const comparisonPrices = new Map();
+  matches.forEach(({ comparison }) => {
+    if (!comparison) return;
+    const prices = comparisonPrices.get(comparison.dimension) || [];
+    prices.push(comparison.unitPrice);
+    comparisonPrices.set(comparison.dimension, prices);
+  });
+  const rankings = new Map([...comparisonPrices].map(([dimension, prices]) => {
+    const ranked = [...new Set(prices)].sort((left, right) => left - right);
+    return [dimension, { best: ranked[0], next: ranked.find((price) => price > ranked[0]) }];
+  }));
+  const isBestValue = ({ comparison }) => comparison
+    && comparison.unitPrice === rankings.get(comparison.dimension)?.best;
   if (state.cataloguePage === 1) {
-    matches.sort((left, right) =>
-      Number(Number(right.store.price) === bestPrice) - Number(Number(left.store.price) === bestPrice));
+    matches.sort((left, right) => {
+      const suggestedOrder = Number(isBestValue(right)) - Number(isBestValue(left));
+      if (suggestedOrder) return suggestedOrder;
+      if (left.comparison && right.comparison && left.comparison.dimension === right.comparison.dimension) {
+        return left.comparison.unitPrice - right.comparison.unitPrice;
+      }
+      if (left.comparison && !right.comparison) return -1;
+      if (!left.comparison && right.comparison) return 1;
+      return comparisonStoreOrder.indexOf(left.store.storeId) - comparisonStoreOrder.indexOf(right.store.storeId);
+    });
   }
 
   matches.forEach((match) => {
     const article = document.createElement("article");
-    const { product, store } = match;
-    const isBestPrice = Number(store.price) === bestPrice;
+    const { product, store, comparison } = match;
+    const isBestPrice = isBestValue(match);
     const isSuggested = state.cataloguePage === 1 && isBestPrice;
-    const saving = isBestPrice && nextPrice ? nextPrice - bestPrice : 0;
+    const ranking = comparison ? rankings.get(comparison.dimension) : null;
+    const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
     article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
     const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
     const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
     const bestPriceBadge = isBestPrice
-      ? `<span class="best-price-badge">${isSuggested ? "Suggested - " : ""}Best price${saving > 0 ? ` - ${formatMoney(saving)} less` : ""}</span>`
+      ? `<span class="best-price-badge">${isSuggested ? "Suggested - " : ""}Best price per ${comparison.comparisonUnit}${saving > 0 ? ` - ${formatMoney(saving)}/${comparison.comparisonUnit} less` : ""}</span>`
+      : "";
+    const unitPrice = comparison
+      ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
       : "";
     const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
     const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
@@ -217,7 +304,7 @@ function renderCatalogueResults() {
         ${special}
         ${link}
       </div>
-      <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong><button type="button" class="catalogue-add-btn">Add to basket</button></div>
+      <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
     `;
     article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store));
     wrap.appendChild(article);
@@ -264,7 +351,7 @@ async function searchCatalogue(page = 1) {
     state.cataloguePage = payload.page || page;
     state.catalogueHasMore = Boolean(payload.hasMore);
     $("#catalogueStatus").textContent = state.catalogueResults.length
-      ? `Closest priced matches for ${query}`
+      ? `Comparable unit prices for ${query}`
       : "No priced catalogue matches yet.";
     renderCatalogueResults();
   } catch (error) {
@@ -565,7 +652,7 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=9").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=10").catch(() => {});
   });
 }
 
