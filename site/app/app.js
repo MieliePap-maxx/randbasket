@@ -85,7 +85,7 @@ function itemRow(item) {
   const storeName = item.selectedStoreName
     || defaultStores.find((store) => store.id === (item.selectedStoreId || linkedStoreId))?.name
     || "Choose from search";
-  const details = [item.targetSize, item.category].filter(Boolean).join(" Â· ");
+  const details = [item.targetSize, item.category].filter(Boolean).join(" - ");
   tr.innerHTML = `
     <td class="item-name" data-label="Product"><div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div></td>
     <td class="basket-store-cell" data-label="Retailer"><span class="basket-store">${escapeHtml(storeName)}</span></td>
@@ -148,7 +148,7 @@ function renderCatalogueResults() {
     const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
     const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
     const bestPriceBadge = isBestPrice
-      ? `<span class="best-price-badge">Best price${saving > 0 ? ` Â· ${formatMoney(saving)} less` : ""}</span>`
+      ? `<span class="best-price-badge">Best price${saving > 0 ? ` - ${formatMoney(saving)} less` : ""}</span>`
       : "";
     const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(product.canonicalName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
     const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
@@ -509,7 +509,7 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=5").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=6").catch(() => {});
   });
 }
 
