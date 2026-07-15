@@ -611,34 +611,13 @@ function closeFeedback() {
   if (dialog.open) dialog.close();
 }
 
-async function submitFeedback(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
+function submitFeedback(event) {
   const button = $("#feedbackSubmitBtn");
   const status = $("#feedbackStatus");
+  $("#feedbackContext").value = `${window.location.origin}${window.location.pathname}`;
   button.disabled = true;
   button.textContent = "Sending...";
   status.textContent = "Sending your suggestion to RandBasket...";
-  try {
-    const fields = Object.fromEntries(new FormData(form).entries());
-    const response = await fetch(form.action, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(fields),
-    });
-    if (!response.ok) throw new Error("Suggestion service unavailable");
-    form.reset();
-    status.textContent = "Thank you â€” your suggestion has been sent.";
-    button.textContent = "Sent";
-    window.setTimeout(() => {
-      button.textContent = "Send another suggestion";
-      button.disabled = false;
-    }, 1400);
-  } catch {
-    status.innerHTML = `We could not send that just now. Please email <a href="mailto:${FEEDBACK_EMAIL}">${FEEDBACK_EMAIL}</a>.`;
-    button.textContent = "Try again";
-    button.disabled = false;
-  }
 }
 
 function wireEvents() {
@@ -693,7 +672,17 @@ async function init() {
   renderResults();
   updateSummary();
   wireEvents();
-  if (window.location.hash === "#suggestions") openFeedback();
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("feedback") === "sent") {
+    openFeedback();
+    $("#feedbackForm").reset();
+    $("#feedbackStatus").textContent = "Thank you - your suggestion has been submitted.";
+    $("#feedbackSubmitBtn").textContent = "Send another suggestion";
+    url.searchParams.delete("feedback");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } else if (window.location.hash === "#suggestions") {
+    openFeedback();
+  }
 }
 
 init().catch((error) => {
@@ -702,7 +691,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=11").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=12").catch(() => {});
   });
 }
-
