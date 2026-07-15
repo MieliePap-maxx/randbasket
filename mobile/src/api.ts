@@ -193,5 +193,5 @@ export async function requestJson<T>(
 }
 
 export function getDefaultApiUrl() {
-  return process.env.EXPO_PUBLIC_API_URL || "";
+  return process.env.EXPO_PUBLIC_API_URL || "https://api.randbasket.co.za";
 }
