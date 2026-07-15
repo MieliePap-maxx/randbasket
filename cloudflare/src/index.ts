@@ -212,10 +212,6 @@ function isStoreEligible(query: string, productCategory: string | undefined, sto
     return excluded && !normalizedQuery.includes(excluded) && offerText.includes(excluded);
   });
   if (hasExcludedTerm) return false;
-  const preferredTerms = parseJsonArray(profile.preferred_terms_json).map(clean).filter(Boolean);
-  if (normalizedQuery === clean(profile.term) && preferredTerms.length) {
-    return preferredTerms.some((term) => offerText.includes(term));
-  }
   return true;
 }
 

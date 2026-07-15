@@ -33,7 +33,9 @@ Adding a sitemap is discovery only. A retailer is not considered working until i
 
 ### Gate 1: SPAR
 
+- [x] Import reviewed national SPAR specials with official artwork, prices, deal conditions, and validity dates.
 - [ ] Connect an approved selected-store product and price source; the public SPAR sitemap alone is not a priced catalogue.
+- [ ] Map the shopper's approved location to the matching current SPAR store/regional flipbook without combining prices from unrelated regions.
 - [ ] Ask for location permission with a clear explanation, then resolve the user's area to a supported SPAR store without storing precise location or tracking in the background.
 - [ ] Import product name, current and regular price, pack size, image, retailer URL, availability, store identifier, and freshness timestamp.
 - [ ] Normalize grams, kilograms, millilitres, litres, multipacks, and each-item quantities before value comparison.
@@ -42,6 +44,7 @@ Adding a sitemap is discovery only. A retailer is not considered working until i
 ### Gate 2: Makro
 
 - [x] Add public Makro catalogue discovery and an initial priced product batch.
+- [x] Add a reviewed browser-capture import path for catalogue pages protected by human verification.
 - [ ] Expand the resumable importer across grocery categories without bypassing retailer verification controls.
 - [ ] Reach useful coverage comparable to Pick n Pay, Checkers, and Woolworths for the top shopping searches.
 - [ ] Verify product links, images, stock, specials, pack sizes, unit normalization, result relevance, and freshness timestamps.
