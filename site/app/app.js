@@ -75,22 +75,22 @@ function renderStores() {
     wrap.appendChild(label);
   });
   $("#sourceNote").textContent =
-    "Prices come from RandBasket's published catalogue. Exact retailer links are used when available.";
+    "Choose a product above and RandBasket keeps the retailer link behind the scenes.";
 }
 
 function itemRow(item) {
   const tr = document.createElement("tr");
   tr.dataset.id = item.id;
-  const links = item.links || {};
+  const linkedStoreId = Object.keys(item.links || {}).find((storeId) => item.links[storeId]);
+  const storeName = item.selectedStoreName
+    || defaultStores.find((store) => store.id === (item.selectedStoreId || linkedStoreId))?.name
+    || "Choose from search";
+  const details = [item.targetSize, item.category].filter(Boolean).join(" Â· ");
   tr.innerHTML = `
-    <td class="item-name" data-label="Item"><input data-field="name" value="${escapeAttr(item.name)}" /></td>
-    <td class="query" data-label="Search phrase"><input data-field="query" value="${escapeAttr(item.query || item.name)}" /></td>
-    <td class="target-size" data-label="Target size"><input data-field="targetSize" placeholder="500g, 2L, 18 pack" value="${escapeAttr(item.targetSize || "")}" /></td>
-    <td class="quantity" data-label="Qty"><input data-field="quantity" type="number" min="0.1" step="0.1" value="${item.quantity || 1}" /></td>
-    <td class="category" data-label="Category"><input data-field="category" value="${escapeAttr(item.category || "")}" /></td>
-    <td class="vendor-url" data-label="Pick n Pay URL"><input data-link="pick-n-pay" placeholder="https://www.pnp.co.za/..." value="${escapeAttr(links["pick-n-pay"] || "")}" /></td>
-    <td class="vendor-url" data-label="Checkers URL"><input data-link="checkers" placeholder="https://www.checkers.co.za/..." value="${escapeAttr(links.checkers || "")}" /></td>
-    <td class="vendor-url" data-label="Woolworths URL"><input data-link="woolworths" placeholder="https://www.woolworths.co.za/..." value="${escapeAttr(links.woolworths || "")}" /></td>
+    <td class="item-name" data-label="Product"><div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div></td>
+    <td class="basket-store-cell" data-label="Retailer"><span class="basket-store">${escapeHtml(storeName)}</span></td>
+    <td class="basket-price-cell" data-label="Price"><strong class="basket-price">${formatMoney(item.selectedPrice)}</strong></td>
+    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" min="0.1" step="0.1" value="${item.quantity || 1}" /></td>
     <td class="remove" data-label="Remove"><button type="button" data-remove="${item.id}">Remove</button></td>
   `;
   return tr;
@@ -134,17 +134,28 @@ function renderCatalogueResults() {
     return;
   }
 
+  const rankedPrices = [...new Set(matches.map(({ store }) => Number(store.price)).filter(Number.isFinite))]
+    .sort((left, right) => left - right);
+  const bestPrice = rankedPrices[0];
+  const nextPrice = rankedPrices.find((price) => price > bestPrice);
+
   matches.forEach((match) => {
     const article = document.createElement("article");
-    article.className = "catalogue-store-result";
     const { product, store } = match;
+    const isBestPrice = Number(store.price) === bestPrice;
+    const saving = isBestPrice && nextPrice ? nextPrice - bestPrice : 0;
+    article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
     const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
     const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
+    const bestPriceBadge = isBestPrice
+      ? `<span class="best-price-badge">Best price${saving > 0 ? ` Â· ${formatMoney(saving)} less` : ""}</span>`
+      : "";
     const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(product.canonicalName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
     const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
     article.innerHTML = `
       <div class="catalogue-image">${image}</div>
       <div class="catalogue-product-copy">
+        ${bestPriceBadge}
         <strong>${escapeHtml(store.storeName)}</strong>
         <span>${escapeHtml(product.canonicalName)}</span>
         <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
@@ -171,6 +182,9 @@ async function addCatalogueProductToBasket(product, store) {
     targetSize: store.size || product.targetSize || "",
     quantity: 1,
     category: product.category || "",
+    selectedStoreId: store.storeId,
+    selectedStoreName: store.storeName,
+    selectedPrice: store.price,
     links: { [store.storeId]: store.url || "" },
   });
   renderItems();
@@ -205,21 +219,10 @@ async function searchCatalogue(page = 1) {
 }
 
 function readItemsFromDom() {
-  state.items = [...$("#itemsBody").querySelectorAll("tr")].map((row) => {
-    const get = (field) => row.querySelector(`[data-field="${field}"]`).value.trim();
-    const links = {};
-    row.querySelectorAll("[data-link]").forEach((input) => {
-      links[input.dataset.link] = input.value.trim();
-    });
-    return {
-      id: row.dataset.id,
-      name: get("name"),
-      query: get("query"),
-      targetSize: get("targetSize"),
-      quantity: Number(get("quantity") || 1),
-      category: get("category"),
-      links,
-    };
+  const rows = new Map([...$("#itemsBody").querySelectorAll("tr")].map((row) => [row.dataset.id, row]));
+  state.items = state.items.map((item) => {
+    const quantityInput = rows.get(item.id)?.querySelector('[data-field="quantity"]');
+    return { ...item, quantity: Number(quantityInput?.value || item.quantity || 1) };
   });
 }
 
@@ -447,22 +450,9 @@ async function runScan() {
 }
 
 function addItem() {
-  readItemsFromDom();
-  state.items.push({
-    id: crypto.randomUUID(),
-    name: "New item",
-    query: "new item",
-    targetSize: "",
-    quantity: 1,
-    category: "",
-    links: {
-      "pick-n-pay": "",
-      checkers: "",
-      woolworths: "",
-    },
-  });
-  renderItems();
-  updateSummary();
+  $("#catalogueSearchInput").focus();
+  $("#catalogueSearchInput").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
 }
 
 function wireEvents() {
@@ -519,7 +509,7 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=4").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=5").catch(() => {});
   });
 }
 
