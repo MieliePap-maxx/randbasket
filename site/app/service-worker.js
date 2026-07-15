@@ -1,4 +1,4 @@
-const CACHE_NAME = "randbasket-web-v11";
+const CACHE_NAME = "randbasket-web-v12";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -27,4 +27,3 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
 });
-
