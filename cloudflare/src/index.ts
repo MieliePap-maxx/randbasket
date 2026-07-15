@@ -1,6 +1,16 @@
 export interface Env {
   APP_ORIGIN: string;
   DB: D1Database;
+  FEEDBACK_EMAIL: {
+    send(message: {
+      from: string;
+      to: string;
+      subject: string;
+      text: string;
+    }): Promise<{ messageId?: string }>;
+  };
+  FEEDBACK_FROM: string;
+  FEEDBACK_TO: string;
 }
 
 type ProductRow = {
@@ -359,6 +369,70 @@ async function queueRequest(request: Request, env: Env) {
   return json(request, env, { ok: true, request: { id, query, source: body.source || "public-app", status: "queued", createdAt: now, updatedAt: now } }, 202);
 }
 
+async function submitFeedback(request: Request, env: Env) {
+  const body = await request.json<{
+    name?: string;
+    email?: string;
+    feedbackType?: string;
+    message?: string;
+    page?: string;
+    honeypot?: string;
+  }>().catch(() => ({}));
+  if (String(body.honeypot || "").trim()) return json(request, env, { ok: true }, 202);
+
+  const name = String(body.name || "").trim().slice(0, 120);
+  const email = String(body.email || "").trim().slice(0, 254);
+  const feedbackType = String(body.feedbackType || "Other").trim().slice(0, 80);
+  const message = String(body.message || "").trim().slice(0, 5000);
+  const page = String(body.page || "RandBasket web app").trim().slice(0, 500);
+  if (message.length < 5) return json(request, env, { ok: false, error: "Please enter a longer suggestion." }, 400);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json(request, env, { ok: false, error: "Please enter a valid email address." }, 400);
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO feedback_submissions
+      (id, name, email, feedback_type, message, page, delivery_status, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)`,
+  ).bind(id, name, email, feedbackType, message, page, now).run();
+
+  const text = [
+    `Type: ${feedbackType}`,
+    `Name: ${name || "Not provided"}`,
+    `Reply email: ${email || "Not provided"}`,
+    `Page: ${page}`,
+    "",
+    message,
+    "",
+    `Submission ID: ${id}`,
+  ].join("\n");
+
+  try {
+    const delivery = await env.FEEDBACK_EMAIL.send({
+      from: env.FEEDBACK_FROM,
+      to: env.FEEDBACK_TO,
+      subject: `RandBasket suggestion: ${feedbackType.replace(/[\r\n]+/g, " ")}`,
+      text,
+    });
+    await env.DB.prepare(
+      `UPDATE feedback_submissions SET delivery_status = 'sent', email_message_id = ?2, updated_at = ?3 WHERE id = ?1`,
+    ).bind(id, String(delivery.messageId || ""), new Date().toISOString()).run();
+    return json(request, env, { ok: true, id });
+  } catch (error) {
+    console.error("Feedback email delivery failed", id, error);
+    await env.DB.prepare(
+      `UPDATE feedback_submissions SET delivery_status = 'failed', updated_at = ?2 WHERE id = ?1`,
+    ).bind(id, new Date().toISOString()).run();
+    return json(request, env, {
+      ok: false,
+      saved: true,
+      error: "Your suggestion was saved, but the email notification could not be sent yet.",
+    }, 503);
+  }
+}
+
 async function exactOffer(env: Env, retailerId: string, productUrl: string) {
   if (!productUrl) return null;
   return env.DB.prepare(
@@ -453,6 +527,7 @@ export default {
     if (request.method === "GET" && ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)) return catalogueResponse(request, env, url);
     if (request.method === "GET" && ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(url.pathname)) return categoriesResponse(request, env);
     if (request.method === "POST" && ["/v1/catalogue/request", "/api/catalogue/request"].includes(url.pathname)) return queueRequest(request, env);
+    if (request.method === "POST" && ["/v1/feedback", "/api/feedback"].includes(url.pathname)) return submitFeedback(request, env);
     if (request.method === "POST" && ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)) return scanBasket(request, env);
     return json(request, env, { ok: false, error: "Not found" }, 404);
   },
