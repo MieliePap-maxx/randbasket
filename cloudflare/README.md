@@ -2,6 +2,10 @@
 
 This folder contains the public catalogue API. It serves cached prices and retailer product choices from D1; it does not scrape retailer sites while a shopper waits.
 
+## Public website deployment
+
+The Cloudflare Pages project should use the repository root with no build command and `site` as its build output directory. The public price checker is available at `/app/` and calls `https://api.randbasket.co.za` directly. Attach both `randbasket.co.za` and `www.randbasket.co.za` to the Pages project.
+
 ## First deployment
 
 All temporary imports and dependency installs should stay on `D:`.
@@ -42,3 +46,4 @@ node scripts/export-catalogue-import.mjs `
 - `POST /v1/catalogue/request` with `{ "query": "product name", "source": "mobile" }`
 
 The older `/api/catalogue` route is also supported for the existing web client while it is migrated.
+
