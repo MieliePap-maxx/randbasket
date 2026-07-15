@@ -149,20 +149,20 @@
     </footer>
 
     <dialog id="feedbackDialog" class="feedback-dialog" aria-labelledby="feedbackTitle">
-      <form id="feedbackForm" class="feedback-card" action="https://formsubmit.co/ajax/randbasketzar@gmail.com" method="POST">
+      <form id="feedbackForm" class="feedback-card" action="https://formsubmit.co/randbasketzar@gmail.com" method="POST">
         <div class="feedback-head">
           <div>
             <p class="eyebrow">Help shape RandBasket</p>
             <h2 id="feedbackTitle">What should we improve?</h2>
-            <p>Ideas, corrections, confusing bitsâ€”send them all. Every message reaches the RandBasket team.</p>
+            <p>Ideas, corrections, confusing bits - send them all. Every message reaches the RandBasket team.</p>
           </div>
-          <button id="feedbackCloseBtn" class="dialog-close" type="button" aria-label="Close suggestions">Ã—</button>
+          <button id="feedbackCloseBtn" class="dialog-close" type="button" aria-label="Close suggestions">&times;</button>
         </div>
 
         <input type="hidden" name="_subject" value="New RandBasket suggestion" />
         <input type="hidden" name="_template" value="table" />
-        <input type="hidden" name="_captcha" value="false" />
-        <input id="feedbackContext" type="hidden" name="page" value="RandBasket web app" />
+        <input type="hidden" name="_next" value="https://randbasket.co.za/app/?release=12&amp;feedback=sent" />
+        <input id="feedbackContext" type="hidden" name="_url" value="https://randbasket.co.za/app/" />
         <label class="feedback-honey" aria-hidden="true" hidden>Leave this empty<input type="text" name="_honey" tabindex="-1" autocomplete="off" /></label>
 
         <div class="feedback-grid">
@@ -188,7 +188,6 @@
       </form>
     </dialog>
 
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=12"></script>
   </body>
 </html>
-
