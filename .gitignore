@@ -1,6 +1,12 @@
 # Local data, imported retailer catalogues, browser sessions and logs.
-data/
+data/*
 logs/
+
+# Retailer source definitions are safe to share and keep catalogue ingestion
+# repeatable. The downloaded catalogue itself remains local.
+!data/catalogue/
+data/catalogue/*
+!data/catalogue/retailer-sources.json
 
 # Dependencies and Expo build state.
 node_modules/

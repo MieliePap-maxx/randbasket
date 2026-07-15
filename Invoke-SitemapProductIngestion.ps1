@@ -32,10 +32,24 @@ function Get-SitemapText([string]$Url) {
         "Accept" = "application/xml,text/xml,text/plain,*/*"
     }
     $response = Invoke-WebRequest -Uri $Url -Headers $headers -UseBasicParsing -TimeoutSec 35
-    return [string]$response.Content
+    if ($Url -notmatch "\.gz(?:\?|$)") { return [string]$response.Content }
+    try {
+        $content = [byte[]]$response.Content
+        $input = [System.IO.MemoryStream]::new($content)
+        $gzip = [System.IO.Compression.GzipStream]::new($input, [System.IO.Compression.CompressionMode]::Decompress)
+        $reader = [System.IO.StreamReader]::new($gzip)
+        try { return $reader.ReadToEnd() }
+        finally {
+            $reader.Dispose()
+            $gzip.Dispose()
+            $input.Dispose()
+        }
+    } catch {
+        throw "Could not decompress sitemap $Url - $($_.Exception.Message)"
+    }
 }
 
-function Get-SitemapUrls([string]$Url, [int]$Depth = 0) {
+function Get-SitemapUrls([string]$Url, [int]$Depth = 0, [int]$MaxUrls = 50000) {
     if ([string]::IsNullOrWhiteSpace($Url) -or $Depth -gt 2) { return @() }
     try {
         [xml]$xml = Get-SitemapText $Url
@@ -47,11 +61,14 @@ function Get-SitemapUrls([string]$Url, [int]$Depth = 0) {
     foreach ($loc in @($xml.SelectNodes("//*[local-name()='loc']"))) {
         $value = [string]$loc.InnerText
         if ($value -match "\.xml(?:\.gz)?$" -and $Depth -lt 2) {
-            foreach ($childUrl in @(Get-SitemapUrls $value ($Depth + 1))) { $urls.Add([string]$childUrl) }
+            foreach ($childUrl in @(Get-SitemapUrls $value ($Depth + 1) $MaxUrls)) {
+                $urls.Add([string]$childUrl)
+                if ($urls.Count -ge $MaxUrls) { break }
+            }
         } else {
             $urls.Add($value)
         }
-        if ($urls.Count -ge 50000) { break }
+        if ($urls.Count -ge $MaxUrls) { break }
     }
     return $urls.ToArray()
 }
@@ -66,6 +83,8 @@ function Get-ProductNameFromUrl([string]$Url) {
         $slug = $parts[-1] -replace "-[0-9]+(?:EA|KG)?$", ""
     } elseif ($Url -match "woolworths\.co\.za/prod/") {
         $slug = @($parts | Where-Object { $_ -ne "_" -and $_ -notmatch "^A-[0-9]+" } | Select-Object -Last 1)
+    } elseif ($Url -match "makro\.co\.za/.+/p/") {
+        $slug = $parts | Select-Object -First 1
     }
     if (-not $slug) { $slug = $parts[-1] }
     $name = [Uri]::UnescapeDataString([string]$slug)
@@ -177,7 +196,8 @@ foreach ($retailer in @($sourceConfig.retailers)) {
     if ($storeFilter.Count -gt 0 -and $storeFilter -notcontains ([string]$retailer.storeId).ToLowerInvariant()) { continue }
     if (-not $retailer.sitemapIndexUrl) { continue }
     Write-Host "Reading product sitemap: $($retailer.storeName)"
-    $allProductUrls = @(Get-SitemapUrls $retailer.sitemapIndexUrl | Where-Object {
+    $sitemapLimit = [math]::Max(1, $SkipProductsPerStore + $MaxProductsPerStore)
+    $allProductUrls = @(Get-SitemapUrls $retailer.sitemapIndexUrl 0 $sitemapLimit | Where-Object {
         $_ -match ([string]$retailer.productUrlPattern)
     } | Select-Object -Unique)
     $urls = @($allProductUrls | Select-Object -Skip $SkipProductsPerStore -First $MaxProductsPerStore)

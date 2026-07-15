@@ -17,6 +17,8 @@ const defaultStores = [
   { id: "pick-n-pay", name: "Pick n Pay" },
   { id: "checkers", name: "Checkers" },
   { id: "woolworths", name: "Woolworths" },
+  { id: "spar", name: "SPAR" },
+  { id: "makro", name: "Makro" },
 ];
 
 const moneyFmt = new Intl.NumberFormat("en-ZA", {
@@ -90,7 +92,7 @@ function cleanDisplayText(value) {
     .trim();
 }
 
-const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths"];
+const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
 
 const measurementUnits = {
   mg: { dimension: "mass", baseMultiplier: 0.001, comparisonAmount: 1000, comparisonUnit: "kg" },

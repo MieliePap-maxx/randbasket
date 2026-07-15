@@ -67,6 +67,8 @@ const retailers = [
   { id: "pick-n-pay", name: "Pick n Pay" },
   { id: "checkers", name: "Checkers" },
   { id: "woolworths", name: "Woolworths" },
+  { id: "spar", name: "SPAR" },
+  { id: "makro", name: "Makro" },
 ];
 
 function corsHeaders(request: Request, env: Env) {

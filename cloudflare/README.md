@@ -2,6 +2,10 @@
 
 This folder contains the public catalogue API. It serves cached prices and retailer product choices from D1; it does not scrape retailer sites while a shopper waits.
 
+## Retailer coverage
+
+Pick n Pay, Checkers, Woolworths, SPAR, and Makro are represented in the API and app. Makro publishes product URLs through compressed sitemaps, which the local importer supports. Its price pages currently present a human-verification response to unattended requests, so a browser-approved or partner-feed price refresh is required before Makro prices are published. SPAR's public sitemap is informational; SPAR2U prices are selected-store and app-catalogue dependent, so its price feed also needs a store-aware ingestion route.
+
 ## Public website deployment
 
 The Cloudflare Pages project should use the repository root with no build command and `site` as its build output directory. The public price checker is available at `/app/` and calls `https://api.randbasket.co.za` directly. Attach both `randbasket.co.za` and `www.randbasket.co.za` to the Pages project.

@@ -1,0 +1,77 @@
+{
+  "version": 2,
+  "notes": "Retailer product sources. SPAR's public sitemap is informational; SPAR2U catalogue pricing needs a selected local store. Makro publishes product URLs through compressed sitemap files but blocks unattended price-page reads.",
+  "retailers": [
+    {
+      "storeId": "pick-n-pay",
+      "storeName": "Pick n Pay",
+      "baseUrl": "https://www.pnp.co.za",
+      "searchTemplate": "https://www.pnp.co.za/search/{pathQuery}",
+      "sitemapIndexUrl": "https://www.pnp.co.za/sitemap.xml",
+      "productUrlPattern": "pnp\\.co\\.za/.+/p/[0-9A-Z_]+",
+      "categoryUrlPatterns": [
+        "pnp\\.co\\.za/All-Products/.+",
+        "pnp\\.co\\.za/(Milk|Fresh|Food|Pantry|Cleaning|Household|Baby|Pets|Health|Beauty).+"
+      ],
+      "rateLimitMs": 1800,
+      "renderSearchPages": true,
+      "enabled": true
+    },
+    {
+      "storeId": "checkers",
+      "storeName": "Checkers",
+      "baseUrl": "https://www.checkers.co.za",
+      "searchTemplate": "https://www.checkers.co.za/search?query={query}",
+      "sitemapIndexUrl": "https://www.checkers.co.za/sitemap.xml",
+      "productUrlPattern": "checkers\\.co\\.za/product/.+",
+      "categoryUrlPatterns": [
+        "checkers\\.co\\.za/c-.+",
+        "checkers\\.co\\.za/.*/c-.+",
+        "checkers\\.co\\.za/(food|fresh|household|baby|health|beauty|pets).+"
+      ],
+      "rateLimitMs": 2200,
+      "renderSearchPages": true,
+      "enabled": true
+    },
+    {
+      "storeId": "woolworths",
+      "storeName": "Woolworths",
+      "baseUrl": "https://www.woolworths.co.za",
+      "searchTemplate": "https://www.woolworths.co.za/browse?searchterm={pathQuery}&fr=1",
+      "sitemapIndexUrl": "https://content.woolworthsstatic.co.za/sitemap/index.xml",
+      "productUrlPattern": "woolworths\\.co\\.za/prod/.+/_/A-[0-9]+",
+      "categoryUrlPatterns": [
+        "woolworths\\.co\\.za/cat/.+",
+        "woolworths\\.co\\.za/browse/.+",
+        "woolworths\\.co\\.za/(food|milk|pantry|cleaning|baby|beauty|pets).+"
+      ],
+      "rateLimitMs": 1800,
+      "renderSearchPages": true,
+      "enabled": true
+    },
+    {
+      "storeId": "spar",
+      "storeName": "SPAR",
+      "baseUrl": "https://www.spar.co.za",
+      "searchTemplate": "https://www.spar.co.za/SPAR2U",
+      "sitemapIndexUrl": "https://www.spar.co.za/googlesitemap.xml",
+      "productUrlPattern": "spar\\.co\\.za/.+/product/.+",
+      "rateLimitMs": 2000,
+      "renderSearchPages": false,
+      "enabled": true,
+      "availability": "store-specific-app-catalogue"
+    },
+    {
+      "storeId": "makro",
+      "storeName": "Makro",
+      "baseUrl": "https://www.makro.co.za",
+      "searchTemplate": "https://www.makro.co.za/search/?text={query}",
+      "sitemapIndexUrl": "https://www.makro.co.za/sitemap_p_product_index_1.xml",
+      "productUrlPattern": "makro\\.co\\.za/.+/p/itm[a-z0-9]+(?:\\?.*)?$",
+      "rateLimitMs": 2000,
+      "renderSearchPages": true,
+      "enabled": true,
+      "availability": "public-sitemap-price-page-protected"
+    }
+  ]
+}

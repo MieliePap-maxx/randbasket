@@ -37,6 +37,8 @@ const blankLinks: Record<string, string> = {
   "pick-n-pay": "",
   checkers: "",
   woolworths: "",
+  spar: "",
+  makro: "",
 };
 
 const defaultSettings: Settings = {
@@ -45,6 +47,8 @@ const defaultSettings: Settings = {
     "pick-n-pay": true,
     checkers: true,
     woolworths: true,
+    spar: true,
+    makro: true,
   },
 };
 
@@ -66,6 +70,8 @@ export default function App() {
     { id: "pick-n-pay", name: "Pick n Pay" },
     { id: "checkers", name: "Checkers" },
     { id: "woolworths", name: "Woolworths" },
+    { id: "spar", name: "SPAR" },
+    { id: "makro", name: "Makro" },
   ]);
   const [latest, setLatest] = useState<ScanEntry | null>(null);
   const [view, setView] = useState<AppView>("basket");
@@ -522,7 +528,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function CatalogueResult({ product, onAdd }: { product: CatalogueProduct; onAdd: () => void }) {
   const imageUrl = product.stores.find((store) => store.imageUrl)?.imageUrl;
-  const retailerOrder = ["pick-n-pay", "checkers", "woolworths"];
+  const retailerOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
   const matchesByRetailer = new Map<string, CatalogueProduct["stores"][number]>();
   product.stores.forEach((store) => {
     const current = matchesByRetailer.get(store.storeId);
@@ -582,7 +588,7 @@ function RetailerMatchComparison({
   onAddProduct: (product: CatalogueProduct) => void;
   query: string;
 }) {
-  const retailerOrder = ["pick-n-pay", "checkers", "woolworths"];
+  const retailerOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
   const ordered = [...matches].sort((left, right) => {
     const leftId = left.stores[0]?.storeId || "";
     const rightId = right.stores[0]?.storeId || "";

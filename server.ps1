@@ -29,13 +29,17 @@ $DefaultSettings = @{
         "pick-n-pay" = $true
         checkers = $true
         woolworths = $true
+        spar = $true
+        makro = $true
     }
 }
 
 $Stores = @(
     [pscustomobject]@{ id = "pick-n-pay"; name = "Pick n Pay"; searchUrl = "https://www.pnp.co.za/search/{pathQuery}"; notes = "Online prices can depend on delivery area." },
     [pscustomobject]@{ id = "checkers"; name = "Checkers"; searchUrl = "https://www.checkers.co.za/search?query={query}"; notes = "Online prices can depend on delivery area." },
-    [pscustomobject]@{ id = "woolworths"; name = "Woolworths"; searchUrl = "https://www.woolworths.co.za/cat?Ntt={query}"; notes = "Food results may vary by store and fulfilment method." }
+    [pscustomobject]@{ id = "woolworths"; name = "Woolworths"; searchUrl = "https://www.woolworths.co.za/cat?Ntt={query}"; notes = "Food results may vary by store and fulfilment method." },
+    [pscustomobject]@{ id = "spar"; name = "SPAR"; searchUrl = "https://www.spar.co.za/SPAR2U"; notes = "SPAR2U prices depend on the selected local SPAR store." },
+    [pscustomobject]@{ id = "makro"; name = "Makro"; searchUrl = "https://www.makro.co.za/search/?text={query}"; notes = "Online prices and stock can depend on delivery area and seller." }
 )
 
 $DirectProductLinks = @{
@@ -308,7 +312,7 @@ function Search-Catalogue($Query, $Limit = 25, $Offset = 0) {
         canonicalName)
     $featured = [System.Collections.Generic.List[object]]::new()
     $featuredIds = @{}
-    foreach ($storeId in @("pick-n-pay", "checkers", "woolworths")) {
+    foreach ($storeId in @("pick-n-pay", "checkers", "woolworths", "spar", "makro")) {
         $retailerMatch = $ordered | Where-Object { @($_.stores | Where-Object { $_.storeId -eq $storeId -and $null -ne $_.price }).Count -gt 0 } | Select-Object -First 1
         if ($retailerMatch -and -not $featuredIds.ContainsKey($retailerMatch.id)) {
             $featured.Add($retailerMatch)
@@ -415,7 +419,7 @@ function Get-CatalogueRetailerMatches($Query, $PerStore = 3) {
 
     $candidates = @(Search-Catalogue $Query 10000 0)
     $matches = [System.Collections.Generic.List[object]]::new()
-    foreach ($storeId in @("pick-n-pay", "checkers", "woolworths")) {
+    foreach ($storeId in @("pick-n-pay", "checkers", "woolworths", "spar", "makro")) {
         $storeCandidates = [System.Collections.Generic.List[object]]::new()
         foreach ($product in $candidates) {
             foreach ($storeMatch in @($product.stores | Where-Object { $_.storeId -eq $storeId -and $null -ne $_.price })) {
