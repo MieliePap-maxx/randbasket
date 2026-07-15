@@ -63,3 +63,19 @@ CREATE TABLE IF NOT EXISTS search_requests (
 
 CREATE INDEX IF NOT EXISTS idx_search_requests_status
   ON search_requests(status, requested_at);
+
+CREATE TABLE IF NOT EXISTS feedback_submissions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  feedback_type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  page TEXT NOT NULL DEFAULT '',
+  delivery_status TEXT NOT NULL DEFAULT 'pending',
+  email_message_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_submissions_created
+  ON feedback_submissions(created_at DESC);
