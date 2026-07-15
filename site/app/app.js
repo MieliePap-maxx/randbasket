@@ -285,7 +285,7 @@ function renderCatalogueResults() {
   $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage}`;
   if (!state.catalogueResults.length) return;
 
-  const retailerMatches = state.cataloguePage === 1 && state.catalogueRetailerMatches.length
+  const retailerMatches = state.catalogueRetailerMatches.length
     ? state.catalogueRetailerMatches
     : state.catalogueResults;
   const seenMatches = new Set();
@@ -335,8 +335,8 @@ function renderCatalogueResults() {
   matches.forEach((match) => {
     const article = document.createElement("article");
     const { product, store, comparison } = match;
-    const isBestPrice = isBestValue(match);
-    const isSuggested = state.cataloguePage === 1 && isBestPrice;
+    const isBestPrice = state.cataloguePage === 1 && isBestValue(match);
+    const isSuggested = isBestPrice;
     const ranking = comparison ? rankings.get(comparison.dimension) : null;
     const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
     article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;

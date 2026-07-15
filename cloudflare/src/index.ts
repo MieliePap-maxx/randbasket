@@ -199,6 +199,7 @@ function isStoreEligible(query: string, productCategory: string | undefined, sto
   const normalizedQuery = clean(query);
   const requestedMeasure = measureFromQuery(query);
   const offeredMeasure = measureFromQuery(store.size || store.productName);
+  if (requestedMeasure && !offeredMeasure) return false;
   if (requestedMeasure && offeredMeasure && requestedMeasure !== offeredMeasure) return false;
   const profile = profiles
     .filter((entry) => normalizedQuery.includes(clean(entry.term)))
@@ -225,10 +226,12 @@ function centsToPrice(cents: number | null) {
 type Measure = { amount: number; kind: "mass" | "volume" };
 
 function parseMeasure(value: string | undefined) {
-  const match = String(value || "").toLowerCase().match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
+  const text = String(value || "").toLowerCase();
+  const multipack = text.match(/\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
+  const match = multipack || text.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
   if (!match) return null;
-  const amount = Number(match[1]);
-  const unit = match[2];
+  const amount = multipack ? Number(match[1]) * Number(match[2]) : Number(match[1]);
+  const unit = multipack ? match[3] : match[2];
   if (!Number.isFinite(amount) || amount <= 0) return null;
   if (unit === "kg") return { amount: amount * 1000, kind: "mass" } satisfies Measure;
   if (unit === "g") return { amount, kind: "mass" } satisfies Measure;
@@ -266,8 +269,10 @@ function distanceKm(location: ShopperLocation | undefined, latitude: number | nu
 }
 
 function offerToStore(offer: OfferRow, location?: ShopperLocation) {
-  const priceCents = offer.normalized_price_cents ?? offer.price_cents;
-  const price = priceCents && priceCents > 0 ? centsToPrice(priceCents) : null;
+  const price = offer.price_cents && offer.price_cents > 0 ? centsToPrice(offer.price_cents) : null;
+  const normalizedPrice = offer.normalized_price_cents && offer.normalized_price_cents > 0
+    ? centsToPrice(offer.normalized_price_cents)
+    : null;
   const regularPrice = centsToPrice(offer.regular_price_cents);
   return {
     storeId: offer.retailer_id,
@@ -277,6 +282,7 @@ function offerToStore(offer: OfferRow, location?: ShopperLocation) {
     size: offer.size_label || undefined,
     unit: offer.unit_label || undefined,
     price,
+    normalizedPrice,
     regularPrice,
     promoText: offer.promo_text || undefined,
     promoApplied: Boolean(offer.promo_applied),
@@ -288,6 +294,18 @@ function offerToStore(offer: OfferRow, location?: ShopperLocation) {
     distanceKm: distanceKm(location, offer.latitude, offer.longitude),
     lastSeenAt: offer.last_seen_at || undefined,
   };
+}
+
+function comparableStoreValue(query: string, product: { targetSize?: string }, store: ReturnType<typeof offerToStore>) {
+  if (store.price == null) return Number.POSITIVE_INFINITY;
+  const offered = parseMeasure(store.size || store.productName);
+  const requested = parseMeasure(measureFromQuery(query));
+  if (requested && store.normalizedPrice != null) return store.normalizedPrice;
+  if (offered && requested && offered.kind === requested.kind) {
+    return store.price * requested.amount / offered.amount;
+  }
+  if (offered) return store.price * 1000 / offered.amount;
+  return store.price;
 }
 
 async function findCatalogue(env: Env, query: string, page: number, pageSize: number, location?: ShopperLocation) {
@@ -303,13 +321,27 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
     `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
      FROM catalogue_products WHERE ${strictClauses} LIMIT 350`,
   ).bind(...strictTerms.map((term) => `%${term}%`));
-  const [{ results: strictResults }, { results: profiles }] = await Promise.all([
+  const retailerClauses = strictTerms.map(() => "p.search_text LIKE ?").join(" AND ");
+  const retailerStatements = retailers.map((retailer) => env.DB.prepare(
+    `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
+     FROM catalogue_products p
+     JOIN catalogue_offers o ON o.product_id = p.id
+     WHERE o.retailer_id = ? AND ${retailerClauses}
+     GROUP BY p.id
+     LIMIT 120`,
+  ).bind(retailer.id, ...strictTerms.map((term) => `%${term}%`)).all<ProductRow>());
+  const [{ results: strictResults }, { results: profiles }, ...retailerResults] = await Promise.all([
     strictStatement.all<ProductRow>(),
     env.DB.prepare(
       "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
     ).all<SearchProfileRow>(),
+    ...retailerStatements,
   ]);
-  let results = strictResults;
+  const strictById = new Map(strictResults.map((product) => [product.id, product]));
+  for (const retailerResult of retailerResults) {
+    for (const product of retailerResult.results) strictById.set(product.id, product);
+  }
+  let results = [...strictById.values()];
   if (!results.length && queryTokens.length > 1) {
     const broadClauses = queryTokens.map(() => "search_text LIKE ?").join(" OR ");
     const broad = await env.DB.prepare(
@@ -358,27 +390,55 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
     score: Number(score.toFixed(3)),
   }));
 
-  const retailerMatches = retailers.flatMap((retailer) => {
-    const seen = new Set<string>();
-    return materialized
+  const rankedMatches = retailers.flatMap((retailer) => materialized
       .flatMap((product) => product.stores
         .filter((store) => store.storeId === retailer.id && store.price != null)
         .filter((store) => isStoreEligible(query, product.category, store, profiles))
-        .map((store) => ({ product, store })))
-      .filter((entry) => {
-        const key = clean(entry.store.productName);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .slice(0, 3)
-      .map((entry) => ({ ...entry.product, stores: [entry.store] }));
+        .map((store) => ({
+          product,
+          store,
+          matchScore: product.score,
+          comparableValue: comparableStoreValue(query, product, store),
+        }))))
+    .filter((entry) => entry.matchScore > 0)
+    .sort((left, right) => left.comparableValue - right.comparableValue
+      || right.matchScore - left.matchScore
+      || right.product.score - left.product.score
+      || left.store.productName.localeCompare(right.store.productName));
+  const seenMatches = new Set<string>();
+  const valueRankedMatches = rankedMatches
+    .filter((entry) => {
+      const key = `${entry.store.storeId}|${clean(entry.store.productName)}`;
+      if (seenMatches.has(key)) return false;
+      seenMatches.add(key);
+      return true;
+    })
+    .map((entry) => ({ ...entry.product, stores: [entry.store] }));
+  const leaderKeys = new Set<string>();
+  const leaders = [
+    valueRankedMatches[0],
+    ...retailers.map((retailer) => valueRankedMatches.find((product) => product.stores[0]?.storeId === retailer.id)),
+  ].filter((product) => {
+    if (!product) return false;
+    const store = product.stores[0];
+    const key = `${store.storeId}|${clean(store.productName)}`;
+    if (leaderKeys.has(key)) return false;
+    leaderKeys.add(key);
+    return true;
   });
+  const retailerMatches = [
+    ...leaders,
+    ...valueRankedMatches.filter((product) => {
+      const store = product.stores[0];
+      return !leaderKeys.has(`${store.storeId}|${clean(store.productName)}`);
+    }),
+  ];
   const start = (page - 1) * pageSize;
+  const pageMatches = retailerMatches.slice(start, start + pageSize);
   return {
-    products: materialized.slice(start, start + pageSize),
-    retailerMatches: page === 1 ? retailerMatches : [],
-    hasMore: materialized.length > start + pageSize,
+    products: pageMatches,
+    retailerMatches: pageMatches,
+    hasMore: retailerMatches.length > start + pageSize,
   };
 }
 
