@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Location from "expo-location";
 
 import {
   CatalogueProduct,
@@ -62,6 +63,17 @@ const scanSteps = [
   "Preparing your fresh results",
 ];
 
+function locationQuery(settings: Settings) {
+  const location = settings.location;
+  if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) return "";
+  return `&latitude=${encodeURIComponent(location.latitude)}&longitude=${encodeURIComponent(location.longitude)}`;
+}
+
+function settingsForStorage(settings: Settings): Settings {
+  const { location: _sessionLocation, ...savedSettings } = settings;
+  return savedSettings;
+}
+
 export default function App() {
   const apiUrl = getDefaultApiUrl();
   const [items, setItems] = useState<GroceryItem[]>([]);
@@ -78,6 +90,7 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStepIndex, setScanStepIndex] = useState(0);
@@ -130,11 +143,25 @@ export default function App() {
     async function loadDeviceState() {
       try {
         const saved = await AsyncStorage.getItem(storageKey);
+        let savedSettings = defaultSettings;
         if (saved) {
           const payload = JSON.parse(saved) as { items?: GroceryItem[]; settings?: Settings; latest?: ScanEntry | null };
           setItems(payload.items || []);
-          setSettings(payload.settings || defaultSettings);
+          savedSettings = settingsForStorage(payload.settings || defaultSettings);
+          setSettings(savedSettings);
           setLatest(payload.latest || null);
+        }
+        if (!savedSettings.locationPermission) {
+          setTimeout(() => {
+            Alert.alert(
+              "Use your shopping location?",
+              "SPAR and other grocers can show different prices by branch. RandBasket uses your approximate location only for searches and price checks while the app is open. We do not save your coordinates, create a location history, or track you in the background.",
+              [
+                { text: "Not now", style: "cancel", onPress: () => setSettings((current) => ({ ...current, locationPermission: "declined" })) },
+                { text: "Use location", onPress: () => void requestShopperLocation() },
+              ],
+            );
+          }, 500);
         }
         setStatus("Ready to compare current catalogue prices.");
       } catch {
@@ -160,9 +187,38 @@ export default function App() {
   }
 
   async function saveAll(nextItems = items, nextSettings = settings, silent = false) {
-    await AsyncStorage.setItem(storageKey, JSON.stringify({ items: nextItems, settings: nextSettings, latest }));
+    await AsyncStorage.setItem(storageKey, JSON.stringify({ items: nextItems, settings: settingsForStorage(nextSettings), latest }));
     if (!silent) {
       setAutoSaveStatus("Saved");
+    }
+  }
+
+  async function requestShopperLocation() {
+    setLocationLoading(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        setSettings((current) => ({ ...current, locationPermission: "denied", location: undefined }));
+        Alert.alert("Location not shared", "RandBasket will continue using national fallback prices.");
+        return;
+      }
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setSettings((previous) => ({
+        ...previous,
+        locationPermission: "granted",
+        location: {
+          latitude: current.coords.latitude,
+          longitude: current.coords.longitude,
+          accuracy: current.coords.accuracy || undefined,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+      setStatus("Location enabled for nearby store pricing.");
+    } catch {
+      setSettings((current) => ({ ...current, locationPermission: "unavailable" }));
+      Alert.alert("Location unavailable", "RandBasket could not determine your location. National prices will still work.");
+    } finally {
+      setLocationLoading(false);
     }
   }
 
@@ -191,7 +247,7 @@ export default function App() {
       setScanStepIndex(scanSteps.length - 1);
       setScanStatusMessage("Catalogue price check complete");
       setLatest(entry);
-      await AsyncStorage.setItem(storageKey, JSON.stringify({ items, settings, latest: entry }));
+      await AsyncStorage.setItem(storageKey, JSON.stringify({ items, settings: settingsForStorage(settings), latest: entry }));
       setStatus(`Updated ${niceDate(entry.createdAt)}`);
       setView("results");
     } catch (error) {
@@ -213,7 +269,7 @@ export default function App() {
     try {
       const payload = await requestJson<CatalogueResponse>(
         apiUrl,
-        `/api/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}`,
+        `/api/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${locationQuery(settings)}`,
       );
       setCatalogueResults(payload.products || []);
       setCatalogueRetailerMatches(payload.retailerMatches || []);
@@ -382,8 +438,16 @@ export default function App() {
               <View style={styles.panel}>
                 <View style={styles.sectionHead}>
                   <Text style={styles.sectionTitle}>Stores</Text>
-                  <Button label="Save" variant="quiet" onPress={() => saveAll().then(() => setStatus("Saved"))} />
+                  <Button
+                    disabled={locationLoading}
+                    label={locationLoading ? "Locating..." : settings.location ? "Update location" : "Use location"}
+                    variant="quiet"
+                    onPress={() => void requestShopperLocation()}
+                  />
                 </View>
+                <Text style={styles.saveStatus}>
+                  {settings.location ? "Nearby store pricing enabled" : "National fallback prices"}
+                </Text>
                 <View style={styles.storeList}>
                   {stores.map((store) => (
                     <View key={store.id} style={styles.storeToggle}>

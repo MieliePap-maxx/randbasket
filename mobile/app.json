@@ -7,9 +7,20 @@
     "scheme": "randbasket",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RandBasket uses your location to select nearby grocer prices and availability."
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mieliepap.sagrocerypricechecker"
+      "bundleIdentifier": "com.mieliepap.sagrocerypricechecker",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "RandBasket uses your location to select nearby grocer prices and availability."
+      }
     },
     "android": {
       "package": "com.mieliepap.sagrocerypricechecker"

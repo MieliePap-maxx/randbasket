@@ -55,10 +55,11 @@ for (let start = 0, part = 1; start < catalogue.length; start += batchSize, part
     for (const [index, offer] of (product.stores || []).entries()) {
       const id = `${product.id}:${offer.storeId || "unknown"}:${index}`;
       statements.push(
-        `INSERT OR REPLACE INTO catalogue_offers (id, product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label, price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type, promo_applied, image_url, product_url, last_seen_at, updated_at) VALUES (${[
+        `INSERT OR REPLACE INTO catalogue_offers (id, product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label, price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type, promo_applied, image_url, product_url, location_key, store_code, store_display_name, latitude, longitude, last_seen_at, updated_at) VALUES (${[
           sql(id), sql(product.id), sql(offer.storeId), sql(offer.storeName), sql(offer.productName), sql(offer.brand), sql(offer.size), sql(offer.unit),
           sql(cents(offer.price)), sql(cents(offer.regularPrice)), sql(cents(offer.normalisedPriceForTarget)), sql(offer.promoText), sql(offer.promoType),
-          offer.promoApplied ? "1" : "0", sql(offer.imageUrl), sql(offer.url), sql(offer.lastSeenAt), sql(now),
+          offer.promoApplied ? "1" : "0", sql(offer.imageUrl), sql(offer.url), sql(offer.locationKey), sql(offer.storeCode),
+          sql(offer.storeDisplayName), sql(offer.latitude), sql(offer.longitude), sql(offer.lastSeenAt), sql(now),
         ].join(", ")});`,
       );
     }

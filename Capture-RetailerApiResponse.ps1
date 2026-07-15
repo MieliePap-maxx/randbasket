@@ -6,7 +6,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputPath,
     [string]$BodyPattern = "",
-    [int]$WaitMs = 45000
+    [string]$MimeTypePattern = "",
+    [int]$WaitMs = 45000,
+    [switch]$InteractiveVerification,
+    [string]$ProfilePath = "",
+    [switch]$KeepProfile
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,7 +36,8 @@ function Receive-CdpMessage($Socket, [int]$TimeoutMs) {
 
 if (-not (Test-Path -LiteralPath $EdgePath)) { throw "Microsoft Edge was not found." }
 
-$profile = Join-Path $DataDir ("edge-api-profile-" + [guid]::NewGuid().ToString("N"))
+$ownsProfile = -not $ProfilePath
+$profile = if ($ProfilePath) { $ProfilePath } else { Join-Path $DataDir ("edge-api-profile-" + [guid]::NewGuid().ToString("N")) }
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
 $port = Get-FreeTcpPort
 $process = $null
@@ -40,7 +45,12 @@ $socket = $null
 
 try {
     $edgeArgs = '--disable-gpu --no-first-run --disable-extensions --remote-debugging-port=' + $port + ' --user-data-dir="' + $profile + '" about:blank'
-    $process = Start-Process -FilePath $EdgePath -ArgumentList $edgeArgs -PassThru -WindowStyle Hidden
+    if ($InteractiveVerification) {
+        Write-Host "Complete any retailer verification in the Edge window. Network capture will continue for $([math]::Round($WaitMs / 1000)) seconds."
+        $process = Start-Process -FilePath $EdgePath -ArgumentList $edgeArgs -PassThru
+    } else {
+        $process = Start-Process -FilePath $EdgePath -ArgumentList $edgeArgs -PassThru -WindowStyle Hidden
+    }
 
     $versionUrl = "http://127.0.0.1:$port/json/version"
     $ready = $false
@@ -88,13 +98,15 @@ try {
         }
         if ($event.method -eq "Network.responseReceived") {
             $url = [string]$event.params.response.url
-            if ($url -match $UrlPattern -and [int]$event.params.response.status -ge 200 -and [int]$event.params.response.status -lt 300) {
+            $mimeType = [string]$event.params.response.mimeType
+            $mimeMatches = -not $MimeTypePattern -or $mimeType -match $MimeTypePattern
+            if ($url -match $UrlPattern -and $mimeMatches -and [int]$event.params.response.status -ge 200 -and [int]$event.params.response.status -lt 300) {
                 $requestId = [string]$event.params.requestId
                 $metadata = $requestMetadata[$requestId]
                 $matchingRequests[[string]$event.params.requestId] = [pscustomobject]@{
                     url = $url
                     status = [int]$event.params.response.status
-                    mimeType = [string]$event.params.response.mimeType
+                    mimeType = $mimeType
                     method = $(if ($metadata) { $metadata.method } else { "" })
                     headers = $(if ($metadata) { $metadata.headers } else { [pscustomobject]@{} })
                     postData = $(if ($metadata) { $metadata.postData } else { "" })
@@ -138,5 +150,7 @@ try {
 } finally {
     if ($socket) { try { $socket.Dispose() } catch {} }
     if ($process) { try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {} }
-    try { Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+    if ($ownsProfile -and -not $KeepProfile) {
+        try { Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }

@@ -10,7 +10,7 @@
     <title>Compare grocery prices | RandBasket</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon.svg" />
-    <link rel="stylesheet" href="styles.css?v=8" />
+    <link rel="stylesheet" href="styles.css?v=9" />
   </head>
   <body>
     <header class="app-nav">
@@ -19,7 +19,7 @@
         <span><strong>RandBasket</strong><small>Compare. Save. Shop smarter.</small></span>
       </a>
       <nav class="app-nav-links" aria-label="App navigation">
-        <a href="#compare">Compare</a>
+        <a class="active" href="#compare" aria-current="page">Price Checker</a>
         <a href="#basket">My basket</a>
         <button id="feedbackOpenBtn" class="feedback-nav-btn" type="button">Suggestions</button>
       </nav>
@@ -84,6 +84,10 @@
             Product matches per store
             <input id="maxResultsInput" type="number" min="1" max="12" step="1" />
           </label>
+          <div class="location-setting">
+            <div><strong>Shopping location</strong><span id="locationStatus">Not shared</span></div>
+            <button class="ghost compact" id="locationBtn" type="button">Use my location</button>
+          </div>
           <fieldset>
             <legend>Stores to check</legend>
             <div id="storeToggles" class="store-toggles"></div>
@@ -174,6 +178,22 @@
       </form>
     </dialog>
 
-    <script src="app.js?v=16"></script>
+    <dialog id="locationDialog" class="location-dialog" aria-labelledby="locationTitle">
+      <div class="location-card">
+        <div class="location-mark" aria-hidden="true">R</div>
+        <div>
+          <p class="eyebrow">Local prices</p>
+          <h2 id="locationTitle">May RandBasket use your location?</h2>
+          <p><strong>Why we ask:</strong> SPAR and other grocers can show different prices and availability at different branches. Your approximate location helps RandBasket choose offers from stores near you.</p>
+          <p class="location-privacy"><strong>Your privacy:</strong> We use your location only for searches and price checks while RandBasket is open. We do not save your coordinates, create a location history, or track you in the background.</p>
+        </div>
+        <div class="location-actions">
+          <button class="ghost" id="locationDeclineBtn" type="button">Not now</button>
+          <button class="primary" id="locationAllowBtn" type="button">Use my location</button>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="app.js?v=18"></script>
   </body>
 </html>

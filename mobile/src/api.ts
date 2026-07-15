@@ -89,7 +89,13 @@ export type CatalogueRequestResponse = {
 };
 
 export type Settings = {
-  location?: string;
+  location?: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    updatedAt?: string;
+  };
+  locationPermission?: "granted" | "denied" | "declined" | "unavailable";
   maxResultsPerStore: number;
   preferredStore?: string;
   stores: Record<string, boolean>;

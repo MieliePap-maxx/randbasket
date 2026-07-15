@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS catalogue_offers (
   promo_applied INTEGER NOT NULL DEFAULT 0,
   image_url TEXT,
   product_url TEXT NOT NULL,
+  location_key TEXT,
+  store_code TEXT,
+  store_display_name TEXT,
+  latitude REAL,
+  longitude REAL,
   last_seen_at TEXT,
   updated_at TEXT NOT NULL,
   FOREIGN KEY(product_id) REFERENCES catalogue_products(id)
@@ -43,6 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_catalogue_offers_product
 
 CREATE INDEX IF NOT EXISTS idx_catalogue_offers_retailer
   ON catalogue_offers(retailer_id, product_id);
+
+CREATE INDEX IF NOT EXISTS idx_catalogue_offers_location
+  ON catalogue_offers(retailer_id, location_key);
 
 CREATE TABLE IF NOT EXISTS search_profiles (
   term TEXT PRIMARY KEY,

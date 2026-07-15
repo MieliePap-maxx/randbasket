@@ -38,6 +38,11 @@ type OfferRow = {
   promo_applied: number;
   image_url: string | null;
   product_url: string;
+  location_key: string | null;
+  store_code: string | null;
+  store_display_name: string | null;
+  latitude: number | null;
+  longitude: number | null;
   last_seen_at: string | null;
 };
 
@@ -61,6 +66,14 @@ type BasketItem = {
 
 type BasketSettings = {
   stores?: Record<string, boolean>;
+  location?: ShopperLocation;
+};
+
+type ShopperLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  updatedAt?: string;
 };
 
 const retailers = [
@@ -231,7 +244,28 @@ function normaliseForTarget(price: number | null, offeredSize: string | undefine
   return Number((price * target.amount / offered.amount).toFixed(2));
 }
 
-function offerToStore(offer: OfferRow) {
+function validLocation(value: unknown): ShopperLocation | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<ShopperLocation>;
+  if (candidate.latitude == null || candidate.longitude == null) return undefined;
+  const latitude = Number(candidate.latitude);
+  const longitude = Number(candidate.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return undefined;
+  return { latitude, longitude, accuracy: Number(candidate.accuracy) || undefined, updatedAt: candidate.updatedAt };
+}
+
+function distanceKm(location: ShopperLocation | undefined, latitude: number | null, longitude: number | null) {
+  if (!location || latitude == null || longitude == null) return null;
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latDelta = radians(latitude - location.latitude);
+  const lonDelta = radians(longitude - location.longitude);
+  const a = Math.sin(latDelta / 2) ** 2
+    + Math.cos(radians(location.latitude)) * Math.cos(radians(latitude)) * Math.sin(lonDelta / 2) ** 2;
+  return Number((6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1));
+}
+
+function offerToStore(offer: OfferRow, location?: ShopperLocation) {
   const priceCents = offer.normalized_price_cents ?? offer.price_cents;
   const price = priceCents && priceCents > 0 ? centsToPrice(priceCents) : null;
   const regularPrice = centsToPrice(offer.regular_price_cents);
@@ -249,11 +283,14 @@ function offerToStore(offer: OfferRow) {
     imageUrl: offer.image_url || undefined,
     status: price == null ? "catalogue-price-missing" : "cached",
     url: offer.product_url,
+    storeCode: offer.store_code || undefined,
+    storeDisplayName: offer.store_display_name || undefined,
+    distanceKm: distanceKm(location, offer.latitude, offer.longitude),
     lastSeenAt: offer.last_seen_at || undefined,
   };
 }
 
-async function findCatalogue(env: Env, query: string, page: number, pageSize: number) {
+async function findCatalogue(env: Env, query: string, page: number, pageSize: number, location?: ShopperLocation) {
   const queryTokens = tokens(query);
   if (!queryTokens.length) return { products: [], retailerMatches: [], hasMore: false };
 
@@ -297,7 +334,8 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
       const { results: offers } = await env.DB.prepare(
         `SELECT product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label,
                 price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type,
-                promo_applied, image_url, product_url, last_seen_at
+                promo_applied, image_url, product_url, location_key, store_code, store_display_name,
+                latitude, longitude, last_seen_at
          FROM catalogue_offers WHERE product_id IN (${placeholders})`,
       ).bind(...ids).all<OfferRow>();
       for (const offer of offers) {
@@ -314,7 +352,9 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
     category: product.category || undefined,
     targetSize: product.target_size || undefined,
     searchTerms: parseJsonArray(product.search_terms_json),
-    stores: (offerMap.get(product.id) || []).map(offerToStore),
+    stores: (offerMap.get(product.id) || [])
+      .map((offer) => offerToStore(offer, location))
+      .sort((left, right) => (left.distanceKm ?? Number.POSITIVE_INFINITY) - (right.distanceKm ?? Number.POSITIVE_INFINITY)),
     score: Number(score.toFixed(3)),
   }));
 
@@ -346,8 +386,9 @@ async function catalogueResponse(request: Request, env: Env, url: URL) {
   const query = (url.searchParams.get("q") || "").trim();
   const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "10", 10) || 10));
-  const result = await findCatalogue(env, query, page, pageSize);
-  return json(request, env, { ok: true, query, page, pageSize, ...result });
+  const location = validLocation({ latitude: url.searchParams.get("latitude"), longitude: url.searchParams.get("longitude") });
+  const result = await findCatalogue(env, query, page, pageSize, location);
+  return json(request, env, { ok: true, query, page, pageSize, locationApplied: Boolean(location), ...result });
 }
 
 async function categoriesResponse(request: Request, env: Env) {
@@ -435,14 +476,20 @@ async function submitFeedback(request: Request, env: Env) {
   }
 }
 
-async function exactOffer(env: Env, retailerId: string, productUrl: string) {
+async function exactOffer(env: Env, retailerId: string, productUrl: string, location?: ShopperLocation) {
   if (!productUrl) return null;
-  return env.DB.prepare(
+  const { results } = await env.DB.prepare(
     `SELECT product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label,
             price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type,
-            promo_applied, image_url, product_url, last_seen_at
-     FROM catalogue_offers WHERE retailer_id = ?1 AND product_url = ?2 LIMIT 1`,
-  ).bind(retailerId, productUrl).first<OfferRow>();
+            promo_applied, image_url, product_url, location_key, store_code, store_display_name,
+            latitude, longitude, last_seen_at
+     FROM catalogue_offers WHERE retailer_id = ?1 AND product_url = ?2 LIMIT 25`,
+  ).bind(retailerId, productUrl).all<OfferRow>();
+  return results.sort((left, right) => {
+    const leftDistance = distanceKm(location, left.latitude, left.longitude) ?? Number.POSITIVE_INFINITY;
+    const rightDistance = distanceKm(location, right.latitude, right.longitude) ?? Number.POSITIVE_INFINITY;
+    return leftDistance - rightDistance;
+  })[0] || null;
 }
 
 async function scanBasket(request: Request, env: Env) {
@@ -450,18 +497,19 @@ async function scanBasket(request: Request, env: Env) {
   const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
   if (!items.length) return json(request, env, { ok: false, error: "Add at least one item before checking prices." }, 400);
   const enabledRetailers = retailers.filter((retailer) => body.settings?.stores?.[retailer.id] !== false);
+  const location = validLocation(body.settings?.location);
   const scans = [];
 
   for (const item of items) {
     const query = String(item.query || item.name || "").trim();
     const quantity = Math.max(0.01, Number(item.quantity || 1));
-    const lookup = query ? await findCatalogue(env, query, 1, 10) : { retailerMatches: [] as Array<{ stores: ReturnType<typeof offerToStore>[] }> };
+    const lookup = query ? await findCatalogue(env, query, 1, 10, location) : { retailerMatches: [] as Array<{ stores: ReturnType<typeof offerToStore>[] }> };
     const results = [];
     for (const retailer of enabledRetailers) {
-      const linkedOffer = await exactOffer(env, retailer.id, String(item.links?.[retailer.id] || ""));
+      const linkedOffer = await exactOffer(env, retailer.id, String(item.links?.[retailer.id] || ""), location);
       const fallback = lookup.retailerMatches
         .find((product) => product.stores[0]?.storeId === retailer.id)?.stores[0];
-      const store = linkedOffer ? offerToStore(linkedOffer) : fallback;
+      const store = linkedOffer ? offerToStore(linkedOffer, location) : fallback;
       const effectivePrice = store?.price ?? null;
       const normalizedPrice = normaliseForTarget(effectivePrice, store?.size, item.targetSize);
       results.push({
@@ -513,6 +561,7 @@ async function scanBasket(request: Request, env: Env) {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     source: "catalogue-cache",
+    locationApplied: Boolean(location),
     scans,
     basketTotals,
     bestBasketStoreId: bestBasket?.storeId || null,

@@ -121,6 +121,11 @@ a {
   color: #fff;
 }
 
+.app-nav-links a.active {
+  background: var(--lime);
+  color: var(--green-dark);
+}
+
 .feedback-nav-btn {
   border: 1px solid rgba(223, 255, 120, 0.5);
   color: var(--lime);
@@ -688,6 +693,84 @@ legend {
   color: var(--muted);
   font-size: 0.84rem;
   line-height: 1.5;
+}
+
+.location-setting {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7faf8;
+}
+
+.location-setting div {
+  display: grid;
+  gap: 3px;
+}
+
+.location-setting strong {
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+
+.location-setting span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.location-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 14px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(16, 45, 36, 0.28);
+}
+
+.location-dialog::backdrop {
+  background: rgba(12, 32, 26, 0.62);
+}
+
+.location-card {
+  display: grid;
+  gap: 18px;
+  padding: 26px;
+}
+
+.location-card h2 {
+  margin: 4px 0 8px;
+  font-size: 1.45rem;
+}
+
+.location-card p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.location-card .location-privacy {
+  border-left: 3px solid var(--green-bright);
+  padding-left: 12px;
+  color: var(--ink);
+}
+
+.location-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green);
+  font-weight: 900;
+}
+
+.location-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .table-wrap {

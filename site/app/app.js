@@ -50,6 +50,62 @@ function formatMoney(value) {
   return value == null ? "-" : moneyFmt.format(value);
 }
 
+function locationQuery() {
+  const location = state.settings.location;
+  if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) return "";
+  return `&latitude=${encodeURIComponent(location.latitude)}&longitude=${encodeURIComponent(location.longitude)}`;
+}
+
+function renderLocation() {
+  const location = state.settings.location;
+  const enabled = location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude);
+  $("#locationStatus").textContent = enabled ? "Enabled for nearby store pricing" : "Not shared";
+  $("#locationBtn").textContent = enabled ? "Update location" : "Use my location";
+}
+
+function saveDeviceState() {
+  const { location: _sessionLocation, ...savedSettings } = state.settings;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    items: state.items,
+    settings: savedSettings,
+    latest: state.latest,
+  }));
+}
+
+function requestLocation() {
+  if (!("geolocation" in navigator)) {
+    $("#locationStatus").textContent = "Location is unavailable in this browser";
+    return;
+  }
+  $("#locationStatus").textContent = "Waiting for permission...";
+  navigator.geolocation.getCurrentPosition((position) => {
+    state.settings.locationPermission = "granted";
+    state.settings.location = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      updatedAt: new Date().toISOString(),
+    };
+    saveDeviceState();
+    renderLocation();
+    if ($("#locationDialog").open) $("#locationDialog").close();
+  }, (error) => {
+    state.settings.locationPermission = error.code === error.PERMISSION_DENIED ? "denied" : "unavailable";
+    saveDeviceState();
+    $("#locationStatus").textContent = error.code === error.PERMISSION_DENIED
+      ? "Permission declined - national prices will be used"
+      : "Could not determine your location";
+    if ($("#locationDialog").open) $("#locationDialog").close();
+  }, { enableHighAccuracy: false, maximumAge: 900000, timeout: 12000 });
+}
+
+function declineLocation() {
+  state.settings.locationPermission = "declined";
+  saveDeviceState();
+  if ($("#locationDialog").open) $("#locationDialog").close();
+  renderLocation();
+}
+
 const windows1252Bytes = new Map([
   [0x20ac, 0x80], [0x201a, 0x82], [0x0192, 0x83], [0x201e, 0x84], [0x2026, 0x85],
   [0x2020, 0x86], [0x2021, 0x87], [0x02c6, 0x88], [0x2030, 0x89], [0x0160, 0x8a],
@@ -346,7 +402,7 @@ async function searchCatalogue(page = 1) {
   button.disabled = true;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
-    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}`);
+    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
     state.cataloguePage = payload.page || page;
@@ -383,11 +439,7 @@ function readSettingsFromDom() {
 async function saveAll() {
   readItemsFromDom();
   readSettingsFromDom();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    items: state.items,
-    settings: state.settings,
-    latest: state.latest,
-  }));
+  saveDeviceState();
   updateSummary();
 }
 
@@ -608,6 +660,9 @@ function wireEvents() {
   $("#feedbackDialog").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeFeedback();
   });
+  $("#locationBtn").addEventListener("click", requestLocation);
+  $("#locationAllowBtn").addEventListener("click", requestLocation);
+  $("#locationDeclineBtn").addEventListener("click", declineLocation);
   $("#catalogueSearchBtn").addEventListener("click", () => searchCatalogue(1));
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchCatalogue(1);
@@ -636,15 +691,19 @@ async function init() {
     maxResultsPerStore: 6,
     stores: Object.fromEntries(defaultStores.map((store) => [store.id, true])),
   };
+  delete state.settings.location;
   state.stores = defaultStores;
   state.latest = saved.latest || null;
   renderStores();
+  renderLocation();
   renderItems();
   renderResults();
   updateSummary();
   wireEvents();
   if (window.location.hash === "#suggestions") {
     openFeedback();
+  } else if (!state.settings.locationPermission) {
+    $("#locationDialog").showModal();
   }
 }
 
@@ -654,6 +713,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=15").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=18").catch(() => {});
   });
 }
