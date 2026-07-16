@@ -14,7 +14,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
     <link rel="apple-touch-icon" href="/favicon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=17" />
+    <link rel="stylesheet" href="styles.css?v=18" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
     <meta property="og:title" content="Compare Grocery Prices Online | RandBasket" />
@@ -269,8 +269,10 @@
     <dialog id="basketDialog" class="basket-dialog" aria-labelledby="basketDialogTitle">
       <div class="basket-dialog-card">
         <button id="basketDialogClose" class="dialog-close" type="button" aria-label="Close">&times;</button>
-        <p class="eyebrow">Saved baskets</p><h2 id="basketDialogTitle">Name this basket.</h2>
-        <div class="basket-save-row"><input id="basketNameInput" type="text" maxlength="50" placeholder="Weekly shop" /><button id="basketSaveNamedBtn" class="primary" type="button">Save</button></div>
+        <p class="eyebrow">Your baskets</p>
+        <h2 id="basketDialogTitle">Save this basket</h2>
+        <p class="basket-dialog-intro">Give it a name so you can load the same list again later.</p>
+        <div class="basket-save-row"><input id="basketNameInput" type="text" maxlength="50" placeholder="e.g. Weekly shop" /><button id="basketSaveNamedBtn" class="primary" type="button">Save</button></div>
         <div id="savedBasketList" class="saved-basket-list"></div>
         <p id="basketDialogStatus" class="status" aria-live="polite"></p>
       </div>
@@ -283,6 +285,6 @@
       </div>
     </dialog>
 
-    <script src="app.js?v=29"></script>
+    <script src="app.js?v=30"></script>
   </body>
 </html>

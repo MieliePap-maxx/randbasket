@@ -591,7 +591,7 @@ button:disabled:hover {
   font-weight: 900;
 }
 
-.special-card-price button {
+.special-card-price > .catalogue-add-btn {
   margin-left: auto;
   min-height: 36px;
   background: var(--green-dark);
@@ -1644,8 +1644,117 @@ td.remove {
 }
 
 .catalogue-detail-hint {
-  color: var(--green) !important;
+  color: var(--green-dark) !important;
   font-weight: 900;
+}
+
+.product-focus-copy .eyebrow,
+.basket-dialog-card .eyebrow,
+.location-card .eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 10px;
+  border-radius: 5px;
+  padding: 5px 8px;
+  background: #e6f3eb;
+  color: var(--green-dark);
+  letter-spacing: 0.08em;
+}
+
+.basket-dialog-card h2 {
+  margin-bottom: 7px;
+}
+
+.basket-dialog-card > .dialog-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+}
+
+.basket-dialog-intro {
+  max-width: 440px;
+  margin: 0 48px 18px 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.basket-dialog-card .status {
+  min-height: 20px;
+  margin: 10px 0 0;
+}
+
+.quantity-stepper {
+  display: inline-grid;
+  grid-template-columns: 34px minmax(30px, auto) 34px;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 40px;
+  margin-left: auto;
+  overflow: hidden;
+  border: 1px solid #a9c6b5;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--green-dark);
+}
+
+.quantity-stepper button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: #edf6f0;
+  color: var(--green-dark);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.quantity-stepper button:hover {
+  transform: none;
+  background: #dceee3;
+}
+
+.quantity-stepper strong,
+.best-price-result .catalogue-price .quantity-stepper strong {
+  display: block;
+  min-width: 30px;
+  padding-inline: 5px;
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.quantity-stepper.is-compact {
+  grid-template-columns: 30px minmax(26px, auto) 30px;
+  min-height: 36px;
+}
+
+.quantity-stepper.is-compact button {
+  width: 30px;
+  min-height: 34px;
+  font-size: 1rem;
+}
+
+.quantity-stepper.is-compact strong,
+.best-price-result .catalogue-price .quantity-stepper.is-compact strong {
+  min-width: 26px;
+  font-size: 0.8rem;
+}
+
+.product-focus-control {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.product-focus-control .catalogue-add-btn {
+  min-height: 42px;
+  margin-left: 0;
+  border-color: var(--green-dark);
+  background: var(--green-dark);
+  color: #fff;
 }
 
 tr.just-updated {

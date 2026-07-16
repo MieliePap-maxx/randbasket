@@ -16,6 +16,7 @@ const state = {
   scanQueued: false,
   itemSuggestionTimer: null,
   itemSuggestionController: null,
+  catalogueNoticeTimer: null,
 };
 
 const API_ORIGIN = "https://api.randbasket.co.za";
@@ -88,10 +89,25 @@ function wholeQuantity(value) {
   return Number.isFinite(quantity) ? Math.max(1, Math.round(quantity)) : 1;
 }
 
-function setCatalogueNotice(message, tone = "info") {
+function setCatalogueNotice(message, tone = "info", autoClearMs = 0) {
   const status = $("#catalogueStatus");
+  if (state.catalogueNoticeTimer) {
+    window.clearTimeout(state.catalogueNoticeTimer);
+    state.catalogueNoticeTimer = null;
+  }
   status.textContent = message;
   status.className = `catalogue-status notice-${tone}`;
+  if (autoClearMs > 0) {
+    state.catalogueNoticeTimer = window.setTimeout(() => {
+      status.textContent = "";
+      status.className = "catalogue-status";
+      state.catalogueNoticeTimer = null;
+    }, autoClearMs);
+  }
+}
+
+function clearCatalogueNotice() {
+  setCatalogueNotice("");
 }
 
 function getItemSearchHistory() {
@@ -478,6 +494,73 @@ function matchingBasketItem(store, product = null) {
   ));
 }
 
+function visiblePromoText(store) {
+  const hasVerifiedReduction = store.regularPrice && store.price != null && store.regularPrice > store.price;
+  const promoText = cleanDisplayText(store.promoText);
+  if (!promoText || (!store.promoApplied && !hasVerifiedReduction)) return "";
+  const advertisedNowPrice = promoText.match(/\bnow\s+r?\s*(\d+(?:[.,]\d{1,2})?)/i);
+  if (advertisedNowPrice && store.price != null) {
+    const advertisedPrice = Number(advertisedNowPrice[1].replace(",", "."));
+    if (Number.isFinite(advertisedPrice) && Math.abs(advertisedPrice - store.price) > 0.02) return "";
+  }
+  return promoText;
+}
+
+function quantityControlMarkup(existing, label, compact = false, addLabel = "Add") {
+  if (!existing) {
+    return `<button type="button" class="catalogue-add-btn catalogue-item-control">${escapeHtml(addLabel)}</button>`;
+  }
+  return `
+    <div class="quantity-stepper catalogue-item-control${compact ? " is-compact" : ""}" aria-label="${escapeAttr(`Quantity for ${label}`)}">
+      <button type="button" data-quantity-action="decrease" aria-label="${escapeAttr(`Decrease ${label} quantity`)}">&minus;</button>
+      <strong aria-label="Current quantity">${wholeQuantity(existing.quantity)}</strong>
+      <button type="button" data-quantity-action="increase" aria-label="${escapeAttr(`Increase ${label} quantity`)}">&plus;</button>
+    </div>
+  `;
+}
+
+async function adjustCatalogueProductQuantity(product, store, delta, preferredQuery = "") {
+  const existing = matchingBasketItem(store, product);
+  if (!existing && delta > 0) {
+    await addCatalogueProductToBasket(product, store, preferredQuery);
+    return;
+  }
+  if (!existing) return;
+  const nextQuantity = wholeQuantity(existing.quantity) + delta;
+  if (nextQuantity <= 0) {
+    state.items = state.items.filter((item) => item.id !== existing.id);
+  } else {
+    existing.quantity = nextQuantity;
+  }
+  state.latest = null;
+  clearCatalogueNotice();
+  renderItems();
+  renderResults();
+  await saveAll();
+  renderCatalogueResults();
+  if (state.specialsLoaded) renderSpecials();
+  scheduleBasketScan(150);
+}
+
+function wireQuantityControl(root, product, store, preferredQuery = "", onChange = null) {
+  const addButton = root.querySelector(".catalogue-add-btn");
+  if (addButton) {
+    addButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await addCatalogueProductToBasket(product, store, preferredQuery);
+      onChange?.();
+    });
+  }
+  root.querySelectorAll("[data-quantity-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const delta = button.dataset.quantityAction === "increase" ? 1 : -1;
+      await adjustCatalogueProductQuantity(product, store, delta, preferredQuery);
+      onChange?.();
+    });
+  });
+}
+
 function openProductFocus(product, store, comparison, contextQuery = "") {
   const dialog = $("#productFocusDialog");
   const content = $("#productFocusContent");
@@ -489,6 +572,7 @@ function openProductFocus(product, store, comparison, contextQuery = "") {
   const unitPrice = comparison
     ? `${formatMoney(comparison.unitPrice)} per ${escapeHtml(comparison.comparisonUnit)}`
     : "";
+  const promoText = visiblePromoText(store);
   const facts = [
     store.brand && `<span><strong>Brand</strong>${escapeHtml(store.brand)}</span>`,
     (store.size || product.targetSize) && `<span><strong>Pack size</strong>${escapeHtml(store.size || product.targetSize)}</span>`,
@@ -501,20 +585,19 @@ function openProductFocus(product, store, comparison, contextQuery = "") {
       <div class="product-focus-copy">
         <p class="eyebrow">${escapeHtml(store.storeName)}</p>
         <h2 id="productFocusTitle">${escapeHtml(productName)}</h2>
-        <p class="product-focus-description">A close match for <strong>${escapeHtml(contextQuery || state.catalogueQuery || product.canonicalName || productName)}</strong>. Review the pack details and listed retailer price before adding it.</p>
+        <p class="product-focus-description">Matched to your search for <strong>${escapeHtml(contextQuery || state.catalogueQuery || product.canonicalName || productName)}</strong>. Check the pack size and current price before adding it to your basket.</p>
         <div class="product-focus-facts">${facts}</div>
-        ${store.promoText ? `<p class="product-focus-promo">${escapeHtml(store.promoText)}</p>` : ""}
+        ${promoText ? `<p class="product-focus-promo">${escapeHtml(promoText)}</p>` : ""}
         <div class="product-focus-actions">
           <div class="product-focus-price">${wasPrice}<strong>${formatMoney(store.price)}</strong></div>
-          <button id="productFocusAddBtn" class="primary" type="button">${existing ? "Increase quantity" : "Add to basket"}</button>
+          <div class="product-focus-control">${quantityControlMarkup(existing, productName, false, "Add to basket")}</div>
         </div>
       </div>
     </div>
   `;
   watchProductImages(content);
-  $("#productFocusAddBtn").addEventListener("click", async () => {
-    await addCatalogueProductToBasket(product, store, contextQuery || state.catalogueQuery);
-    $("#productFocusAddBtn").textContent = "Increase quantity";
+  wireQuantityControl(content, product, store, contextQuery || state.catalogueQuery, () => {
+    openProductFocus(product, store, comparison, contextQuery);
   });
   if (!dialog.open) dialog.showModal();
 }
@@ -619,7 +702,8 @@ function renderCatalogueResults() {
       const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
       article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
       const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
-      const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
+      const promoText = visiblePromoText(store);
+      const special = promoText ? `<small class="catalogue-special">${escapeHtml(promoText)}</small>` : "";
       const bestPriceBadge = isBestPrice
         ? `<span class="best-price-badge">Best value${saving > 0 ? ` - ${formatMoney(saving)}/${comparison.comparisonUnit} less` : ""}</span>`
         : "";
@@ -638,24 +722,21 @@ function renderCatalogueResults() {
           <span>${escapeHtml(productName)}</span>
           <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
           ${special}
-          <small class="catalogue-detail-hint">Select for product details</small>
+          <small class="catalogue-detail-hint">View product details</small>
         </div>
-        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">${existing ? "Increase qty" : "Add"}</button></div>
+        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${quantityControlMarkup(existing, productName, true)}</div>
       `;
       article.addEventListener("click", (event) => {
-        if (event.target.closest(".catalogue-add-btn")) return;
+        if (event.target.closest(".catalogue-item-control")) return;
         openProductFocus(product, store, comparison);
       });
       article.addEventListener("keydown", (event) => {
-        if (event.target.closest(".catalogue-add-btn")) return;
+        if (event.target.closest(".catalogue-item-control")) return;
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         openProductFocus(product, store, comparison);
       });
-      article.querySelector(".catalogue-add-btn").addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await addCatalogueProductToBasket(product, store, state.catalogueQuery);
-      });
+      wireQuantityControl(article, product, store, state.catalogueQuery);
       columnMatches.appendChild(article);
     });
     wrap.appendChild(column);
@@ -672,7 +753,7 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
     renderItems();
     renderResults();
     await saveAll();
-    setCatalogueNotice(`${productName} was already in your basket. Quantity increased to ${existing.quantity}.`, "warning");
+    clearCatalogueNotice();
     document.querySelector(`[data-id="${CSS.escape(existing.id)}"]`)?.classList.add("just-updated");
     renderCatalogueResults();
     if (state.specialsLoaded) renderSpecials();
@@ -701,7 +782,7 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
   renderItems();
   renderResults();
   await saveAll();
-  setCatalogueNotice(`${productName} added to your basket. Quantity: 1.`, "success");
+  setCatalogueNotice(`${productName} added to your basket.`, "success", 3200);
   document.querySelector(`[data-id="${CSS.escape(item.id)}"]`)?.classList.add("just-updated");
   renderCatalogueResults();
   if (state.specialsLoaded) renderSpecials();
@@ -857,8 +938,9 @@ function renderResults() {
       ? `${formatMoney(result.normalizedPrice)} adjusted to target size`
       : "";
     const details = [pack, normalized].filter(Boolean).join(" - ");
-    const promo = result?.promoText
-      ? `<small class="retailer-basket-promo">${escapeHtml(result.promoText)}</small>`
+    const promoText = result ? visiblePromoText(result) : "";
+    const promo = promoText
+      ? `<small class="retailer-basket-promo">${escapeHtml(promoText)}</small>`
       : "";
     const wasPrice = hasPrice && result.regularPrice && result.regularPrice > result.price
       ? `<span class="was-price">${formatMoney(result.regularPrice)}</span>`
@@ -1047,7 +1129,7 @@ async function runScan({ automatic = false } = {}) {
 function addItem() {
   $("#catalogueSearchInput").focus();
   $("#catalogueSearchInput").scrollIntoView({ behavior: "smooth", block: "center" });
-  $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
+  setCatalogueNotice("Search for an item, then choose the match you want.");
 }
 
 function setSpecialsOpen(open) {
@@ -1080,6 +1162,7 @@ function renderSpecials() {
     card.className = "special-card";
     const productName = cleanDisplayText(store.productName || special.canonicalName) || "Special";
     const existing = matchingBasketItem(store, product);
+    const promoText = visiblePromoText(store);
     const image = store.imageUrl
       ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />`
       : `<div class="catalogue-image-placeholder">Catalogue offer</div>`;
@@ -1088,33 +1171,30 @@ function renderSpecials() {
       <div class="special-card-copy">
         <span class="special-pill">${special.discountPercent ? `${special.discountPercent}% off` : "Catalogue special"}</span>
         <strong>${escapeHtml(productName)}</strong>
-        <small>${escapeHtml([store.storeName, store.size, special.category].filter(Boolean).join(" · "))}</small>
-        ${store.promoText ? `<p>${escapeHtml(store.promoText)}</p>` : ""}
+        <small>${escapeHtml([store.storeName, store.size, special.category].filter(Boolean).join(" - "))}</small>
+        ${promoText ? `<p>${escapeHtml(promoText)}</p>` : ""}
       </div>
       <div class="special-card-price">
-        ${store.regularPrice ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
+        ${store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
         <strong>${formatMoney(store.price)}</strong>
         ${special.saving ? `<small>Save ${formatMoney(special.saving)}</small>` : ""}
-        <button type="button">${existing ? "Increase qty" : "Add to basket"}</button>
+        ${quantityControlMarkup(existing, productName, true, "Add to basket")}
       </div>
     `;
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", `Show details for ${productName} at ${store.storeName}`);
     card.addEventListener("click", (event) => {
-      if (event.target.closest("button")) return;
+      if (event.target.closest(".catalogue-item-control")) return;
       openProductFocus(product, store, getUnitComparison(product, store), special.canonicalName);
     });
     card.addEventListener("keydown", (event) => {
-      if (event.target.closest("button")) return;
+      if (event.target.closest(".catalogue-item-control")) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       openProductFocus(product, store, getUnitComparison(product, store), special.canonicalName);
     });
-    card.querySelector("button").addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await addCatalogueProductToBasket(product, store, special.canonicalName);
-    });
+    wireQuantityControl(card, product, store, special.canonicalName);
     wrap.appendChild(card);
   });
 }
@@ -1147,11 +1227,11 @@ function getSavedBaskets() {
 function renderSavedBaskets() {
   const wrap = $("#savedBasketList");
   const baskets = getSavedBaskets();
-  wrap.innerHTML = baskets.length ? "" : `<div class="empty saved-empty">No named baskets saved yet.</div>`;
+  wrap.innerHTML = baskets.length ? "" : `<div class="empty saved-empty">You have not saved a basket yet.</div>`;
   baskets.forEach((basket) => {
     const row = document.createElement("div");
     row.className = "saved-basket-row";
-    row.innerHTML = `<div><strong>${escapeHtml(basket.name)}</strong><span>${basket.items.length} items · ${new Date(basket.updatedAt).toLocaleDateString()}</span></div><div><button type="button" data-load="${basket.id}">Load</button><button type="button" data-delete="${basket.id}">Delete</button></div>`;
+    row.innerHTML = `<div><strong>${escapeHtml(basket.name)}</strong><span>${basket.items.length} items - ${new Date(basket.updatedAt).toLocaleDateString()}</span></div><div><button type="button" data-load="${basket.id}">Load</button><button type="button" data-delete="${basket.id}">Delete</button></div>`;
     wrap.appendChild(row);
   });
 }
@@ -1165,14 +1245,14 @@ function openBasketDialog(message = "") {
 function saveNamedBasket() {
   readItemsFromDom();
   readSettingsFromDom();
-  if (!state.items.length) { setText("#basketDialogStatus", "Add at least one product before saving."); return; }
+  if (!state.items.length) { setText("#basketDialogStatus", "Add at least one item before saving this basket."); return; }
   const name = $("#basketNameInput").value.trim();
-  if (!name) { setText("#basketDialogStatus", "Give this basket a name first."); return; }
+  if (!name) { setText("#basketDialogStatus", "Enter a basket name to save it."); return; }
   const baskets = getSavedBaskets();
   const old = baskets.find((basket) => basket.name.toLowerCase() === name.toLowerCase());
   const entry = { id: old?.id || `${Date.now()}`, name, items: state.items, settings: state.settings, latest: state.latest, updatedAt: new Date().toISOString() };
   localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify([entry, ...baskets.filter((basket) => basket.id !== entry.id)].slice(0, 20)));
-  setText("#basketDialogStatus", `${name} saved on this device.`);
+  setText("#basketDialogStatus", `"${name}" is saved on this device.`);
   renderSavedBaskets();
   updateBasketActions();
 }
@@ -1438,14 +1518,24 @@ function wireEvents() {
   $("#itemsBody").addEventListener("input", (event) => {
     if (!event.target.matches('[data-field="quantity"]')) return;
     if (event.target.value !== "") event.target.value = String(wholeQuantity(event.target.value));
+    clearCatalogueNotice();
     scheduleBasketScan(650);
+  });
+  $("#itemsBody").addEventListener("change", (event) => {
+    if (!event.target.matches('[data-field="quantity"]')) return;
+    readItemsFromDom();
+    renderCatalogueResults();
+    if (state.specialsLoaded) renderSpecials();
   });
   $("#itemsBody").addEventListener("click", (event) => {
     const removeId = event.target.dataset.remove;
     if (!removeId) return;
     readItemsFromDom();
     state.items = state.items.filter((item) => item.id !== removeId);
+    clearCatalogueNotice();
     renderItems();
+    renderCatalogueResults();
+    if (state.specialsLoaded) renderSpecials();
     updateSummary();
     scheduleBasketScan(150);
   });
@@ -1498,6 +1588,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=32").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=33").catch(() => {});
   });
 }
