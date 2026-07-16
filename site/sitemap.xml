@@ -19,6 +19,24 @@
     <priority>0.5</priority>
   </url>
   <url>
+    <loc>https://randbasket.co.za/about.html</loc>
+    <lastmod>2026-07-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://randbasket.co.za/methodology.html</loc>
+    <lastmod>2026-07-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://randbasket.co.za/faq.html</loc>
+    <lastmod>2026-07-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://randbasket.co.za/privacy.html</loc>
     <lastmod>2026-07-16</lastmod>
     <changefreq>yearly</changefreq>

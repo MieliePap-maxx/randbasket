@@ -145,6 +145,35 @@ footer a { color: var(--ink); text-decoration: none; }
 .support-email span { color: var(--muted); display: block; font-size: .72rem; font-weight: 800; margin-bottom: 4px; text-transform: uppercase; }
 .support-email strong { color: var(--leaf-dark); }
 
+.statement-card { background: linear-gradient(145deg, #113f31, #227451); border-radius: 26px; box-shadow: 0 24px 65px rgba(21,85,58,.2); color: #fff; max-width: 330px; padding: 34px; }
+.statement-card span { color: #acd8bd; display: block; font-size: .72rem; font-weight: 900; letter-spacing: .1em; margin-bottom: 12px; text-transform: uppercase; }
+.statement-card strong { display: block; font-size: 1.85rem; line-height: 1.08; }
+.statement-card p { color: #dcebe3; margin: 18px 0 0; }
+.related-links { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 30px; }
+.related-links a { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 19px; text-decoration: none; }
+.related-links span { color: var(--muted); display: block; font-size: .75rem; font-weight: 800; margin-bottom: 4px; text-transform: uppercase; }
+.related-links strong { color: var(--leaf-dark); font-size: .92rem; }
+.method-flow { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 82px; }
+.method-flow article { background: var(--ink); border-radius: 20px; color: #fff; min-height: 190px; padding: 25px; }
+.method-flow span { align-items: center; background: var(--leaf); border-radius: 50%; display: flex; font-size: .75rem; font-weight: 900; height: 32px; justify-content: center; margin-bottom: 30px; width: 32px; }
+.method-flow strong { display: block; font-size: 1.2rem; margin-bottom: 7px; }
+.method-flow p { color: #c8d8cf; font-size: .88rem; margin: 0; }
+.formula-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 28px 0; }
+.formula-grid article { background: #eaf3ed; border: 1px solid #d1e1d6; border-radius: 16px; padding: 20px; }
+.formula-grid span { color: var(--leaf); display: block; font-size: .72rem; font-weight: 900; letter-spacing: .08em; margin-bottom: 7px; text-transform: uppercase; }
+.formula-grid strong { display: block; font-size: .98rem; }
+.formula-grid p { font-size: .86rem; line-height: 1.5; margin: 8px 0 0; }
+.faq-hero { min-height: 450px; }
+.faq-topics { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 80px; }
+.faq-topics a { background: #fff; border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 14px 36px rgba(19,43,34,.055); padding: 25px; text-decoration: none; }
+.faq-topics span { color: var(--coral); display: block; font-size: .75rem; font-weight: 900; margin-bottom: 20px; }
+.faq-topics strong { display: block; font-size: 1.08rem; }
+.faq-topics small { color: var(--muted); display: block; margin-top: 6px; }
+.faq-library { background: #fff; border: 1px solid var(--line); border-radius: 28px; margin-bottom: 70px; padding: 10px 50px 20px; }
+.faq-group { display: grid; gap: 60px; grid-template-columns: minmax(190px, .55fr) minmax(0, 1.45fr); padding: 58px 0; scroll-margin-top: 90px; }
+.faq-group + .faq-group { border-top: 1px solid var(--line); }
+.faq-group-heading h2 { font-size: 1.65rem; }
+
 @media (max-width: 860px) {
   .info-hero, .support-hero { align-items: start; grid-template-columns: 1fr; padding-top: 64px; }
   .updated-card { max-width: 240px; }
@@ -155,6 +184,10 @@ footer a { color: var(--ink); text-decoration: none; }
   .support-orb { height: auto; max-width: 420px; padding: 34px; width: 100%; }
   .faq-section { gap: 36px; grid-template-columns: 1fr; padding: 36px; }
   .support-contact { grid-template-columns: 1fr; }
+  .method-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .formula-grid { grid-template-columns: 1fr; }
+  .faq-topics { grid-template-columns: 1fr; }
+  .faq-group { gap: 28px; grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
@@ -167,4 +200,8 @@ footer a { color: var(--ink); text-decoration: none; }
   .faq-section { margin: 58px 0 42px; padding: 26px 22px; }
   .support-contact { padding: 30px 24px; }
   .support-email { overflow-wrap: anywhere; }
+  .statement-card { max-width: none; }
+  .related-links, .method-flow { grid-template-columns: 1fr; }
+  .method-flow article { min-height: auto; }
+  .faq-library { padding: 4px 22px 12px; }
 }
