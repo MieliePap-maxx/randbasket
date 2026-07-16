@@ -9,6 +9,10 @@ const state = {
   cataloguePage: 1,
   catalogueHasMore: false,
   specials: [],
+  specialsLoaded: false,
+  autoScanTimer: null,
+  scanInFlight: false,
+  scanQueued: false,
 };
 
 const API_ORIGIN = "https://api.randbasket.co.za";
@@ -97,6 +101,7 @@ function requestLocation() {
     };
     saveDeviceState();
     renderLocation();
+    if (state.items.length) scheduleBasketScan(150);
     if ($("#locationDialog").open) $("#locationDialog").close();
   }, (error) => {
     state.settings.locationPermission = error.code === error.PERMISSION_DENIED ? "denied" : "unavailable";
@@ -402,6 +407,7 @@ async function addCatalogueProductToBasket(product, store) {
   renderItems();
   await saveAll();
   $("#catalogueStatus").textContent = `${productName} added to the basket.`;
+  scheduleBasketScan(150);
 }
 
 async function searchCatalogue(page = 1) {
@@ -594,18 +600,53 @@ function startPickNPayProgress() {
   state.pnpProgressTimer = window.setInterval(update, 1000);
 }
 
-async function runScan() {
+function scheduleBasketScan(delay = 500) {
+  readItemsFromDom();
+  readSettingsFromDom();
+  saveDeviceState();
+  updateSummary();
+  if (state.autoScanTimer) window.clearTimeout(state.autoScanTimer);
+
   if (!state.items.length) {
-    setText("#scanStatus", "Add at least one product before scanning prices.");
-    $("#emptyBasket").scrollIntoView({ behavior: "smooth", block: "center" });
+    state.latest = null;
+    saveDeviceState();
+    renderResults();
+    setText("#bestBasket", "No scan yet");
+    setText("#scanStatus", "Add an item to begin");
     return;
   }
+
+  setText("#scanStatus", "Basket changed - updating totals...");
+  state.autoScanTimer = window.setTimeout(() => {
+    state.autoScanTimer = null;
+    void runScan({ automatic: true });
+  }, delay);
+}
+
+async function runScan({ automatic = false } = {}) {
+  readItemsFromDom();
+  readSettingsFromDom();
+  if (!state.items.length) {
+    setText("#scanStatus", "Add an item to begin");
+    if (!automatic) $("#emptyBasket").scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  if (state.autoScanTimer) {
+    window.clearTimeout(state.autoScanTimer);
+    state.autoScanTimer = null;
+  }
+  if (state.scanInFlight) {
+    state.scanQueued = true;
+    setText("#scanStatus", "Basket changed - another update is queued...");
+    return;
+  }
+
+  state.scanInFlight = true;
   const button = $("#scanBtn");
   button.disabled = true;
-  $("#scanStatus").textContent = "Saving basket...";
+  $("#scanStatus").textContent = automatic ? "Updating basket totals..." : "Scanning retailer prices...";
   try {
     await saveAll();
-    $("#scanStatus").textContent = "Checking retailer prices...";
     state.latest = await api("/v1/scan/catalogue", {
       method: "POST",
       body: JSON.stringify({ items: state.items, settings: state.settings }),
@@ -619,6 +660,11 @@ async function runScan() {
     $("#scanStatus .inline-retry")?.addEventListener("click", runScan);
   } finally {
     button.disabled = false;
+    state.scanInFlight = false;
+    if (state.scanQueued) {
+      state.scanQueued = false;
+      scheduleBasketScan(100);
+    }
   }
 }
 
@@ -626,6 +672,17 @@ function addItem() {
   $("#catalogueSearchInput").focus();
   $("#catalogueSearchInput").scrollIntoView({ behavior: "smooth", block: "center" });
   $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
+}
+
+function setSpecialsOpen(open) {
+  const panel = $("#specials");
+  const content = $("#specialsContent");
+  const toggle = $("#specialsToggle");
+  panel.classList.toggle("is-open", open);
+  content.hidden = !open;
+  toggle.setAttribute("aria-expanded", String(open));
+  $("#specialsToggleLabel").textContent = open ? "Hide offers" : "View offers";
+  if (open && !state.specialsLoaded) void loadSpecials();
 }
 
 function renderSpecials() {
@@ -676,6 +733,7 @@ async function loadSpecials() {
     const retailerQuery = retailer ? `&retailer=${encodeURIComponent(retailer)}` : "";
     const payload = await api(`/v1/specials?limit=30${retailerQuery}${locationQuery()}`);
     state.specials = payload.specials || [];
+    state.specialsLoaded = true;
     $("#specialsStatus").textContent = state.specials.length
       ? `${state.specials.length} verified offers. These prices are included in matching Price Checker results.`
       : "No verified specials are available for this selection yet.";
@@ -730,6 +788,7 @@ function loadSavedBasket(id) {
   state.latest = basket.latest || null;
   renderStores(); renderLocation(); renderItems(); renderResults(); updateSummary(); saveDeviceState();
   $("#basketDialog").close();
+  scheduleBasketScan(150);
 }
 
 function deleteSavedBasket(id) {
@@ -883,7 +942,7 @@ function wireEvents() {
     $("#appMenuBtn").setAttribute("aria-expanded", "false");
   });
   $("#mobileFeedbackBtn").addEventListener("click", openFeedback);
-  $("#scanBtn").addEventListener("click", runScan);
+  $("#scanBtn").addEventListener("click", () => runScan());
   $("#feedbackOpenBtn").addEventListener("click", openFeedback);
   $("#feedbackCloseBtn").addEventListener("click", closeFeedback);
   $("#feedbackForm").addEventListener("submit", submitFeedback);
@@ -899,8 +958,19 @@ function wireEvents() {
   });
   $("#cataloguePreviousBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage - 1));
   $("#catalogueMoreBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage + 1));
+  $("#specialsToggle").addEventListener("click", () => {
+    setSpecialsOpen($("#specialsToggle").getAttribute("aria-expanded") !== "true");
+  });
+  document.querySelectorAll('a[href="#specials"]').forEach((link) => {
+    link.addEventListener("click", () => setSpecialsOpen(true));
+  });
   $("#specialsRefreshBtn").addEventListener("click", loadSpecials);
   $("#specialsRetailer").addEventListener("change", loadSpecials);
+  $("#maxResultsInput").addEventListener("change", () => scheduleBasketScan());
+  $("#storeToggles").addEventListener("change", () => scheduleBasketScan());
+  $("#itemsBody").addEventListener("input", (event) => {
+    if (event.target.matches('[data-field="quantity"]')) scheduleBasketScan(650);
+  });
   $("#itemsBody").addEventListener("click", (event) => {
     const removeId = event.target.dataset.remove;
     if (!removeId) return;
@@ -908,6 +978,7 @@ function wireEvents() {
     state.items = state.items.filter((item) => item.id !== removeId);
     renderItems();
     updateSummary();
+    scheduleBasketScan(150);
   });
 }
 
@@ -933,9 +1004,15 @@ async function init() {
   renderResults();
   updateSummary();
   wireEvents();
-  void loadSpecials();
+  if (state.latest?.createdAt) {
+    setText("#scanStatus", `Updated ${new Date(state.latest.createdAt).toLocaleString()}`);
+  } else if (state.items.length) {
+    scheduleBasketScan(250);
+  }
   if (window.location.hash === "#suggestions") {
     openFeedback();
+  } else if (window.location.hash === "#specials") {
+    setSpecialsOpen(true);
   } else if (!state.settings.locationPermission) {
     $("#locationDialog").showModal();
   }
@@ -948,6 +1025,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=22").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=26").catch(() => {});
   });
 }

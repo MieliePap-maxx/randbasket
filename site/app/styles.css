@@ -415,11 +415,11 @@ button:disabled {
   margin-bottom: 18px;
   border: 1px solid var(--line);
   border-radius: 24px;
-  padding: clamp(18px, 3vw, 30px);
   background:
     radial-gradient(circle at 94% 10%, rgba(223, 255, 120, 0.24), transparent 18rem),
     #fff;
   box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .specials-pane .eyebrow {
@@ -427,15 +427,78 @@ button:disabled {
   margin-bottom: 7px;
 }
 
-.specials-filters {
+.specials-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  gap: 28px;
+  justify-content: space-between;
+  min-height: 0;
+  padding: clamp(18px, 3vw, 28px);
+  text-align: left;
+  width: 100%;
+}
+
+.specials-toggle:hover {
+  background: rgba(223, 255, 120, 0.08);
+}
+
+.specials-toggle h2 {
+  margin: 0;
+}
+
+.specials-toggle .catalogue-subhead {
+  max-width: 760px;
+}
+
+.specials-toggle-action {
+  align-items: center;
+  background: var(--green-dark);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  font-weight: 900;
+  gap: 10px;
+  padding: 11px 15px;
+  white-space: nowrap;
+}
+
+.specials-chevron {
+  display: inline-block;
+  font-size: 1.25rem;
+  line-height: 0.7;
+  transform: translateY(-2px);
+  transition: transform 180ms ease;
+}
+
+.specials-pane.is-open .specials-chevron {
+  transform: rotate(180deg) translateY(2px);
+}
+
+.specials-content {
+  border-top: 1px solid var(--line);
+  padding: 0 clamp(18px, 3vw, 28px) clamp(18px, 3vw, 28px);
+}
+
+.specials-content[hidden] {
+  display: none;
+}
+
+.specials-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) 1fr;
+  grid-template-columns: minmax(180px, 1fr) auto;
   align-items: end;
   gap: 18px;
   margin-top: 18px;
 }
 
-.specials-filters label {
+.specials-controls label {
   margin: 0;
 }
 
@@ -746,6 +809,18 @@ button:disabled {
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.results-subhead {
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin: 4px 0 0;
+}
+
+.results-actions #scanStatus {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 label {
@@ -1508,10 +1583,26 @@ td.remove {
   }
 
   .specials-pane {
-    padding: 14px;
+    border-radius: 18px;
   }
 
-  .specials-filters {
+  .specials-toggle {
+    align-items: flex-start;
+    display: grid;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .specials-toggle-action {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .specials-content {
+    padding: 0 18px 18px;
+  }
+
+  .specials-controls {
     grid-template-columns: 1fr;
   }
 

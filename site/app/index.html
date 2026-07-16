@@ -14,7 +14,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
     <link rel="apple-touch-icon" href="/favicon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=13" />
+    <link rel="stylesheet" href="styles.css?v=15" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
     <meta property="og:title" content="Compare Grocery Prices Online | RandBasket" />
@@ -69,7 +69,6 @@
             <a class="hero-cta" href="#compare">Start comparing</a>
             <button class="hero-secondary" id="saveBtn" type="button">Save basket</button>
             <button class="hero-secondary" id="shareBtn" type="button">Share basket</button>
-            <button class="hero-secondary" id="scanBtn" type="button">Scan prices</button>
           </div>
         </div>
         <div class="hero-proof" aria-label="RandBasket benefits">
@@ -117,28 +116,31 @@
       </section>
 
       <section class="specials-pane" id="specials" aria-label="Current grocery catalogues and specials">
-        <div class="pane-header">
+        <button id="specialsToggle" class="specials-toggle" type="button" aria-expanded="false" aria-controls="specialsContent">
           <div>
             <p class="eyebrow">Current catalogue offers</p>
             <h2>Catalogues &amp; Specials</h2>
             <p class="catalogue-subhead">Browse verified promotional prices. When a special matches your basket, Price Checker uses it automatically.</p>
           </div>
-          <button class="primary compact" id="specialsRefreshBtn" type="button">Refresh specials</button>
+          <span class="specials-toggle-action"><span id="specialsToggleLabel">View offers</span><span class="specials-chevron" aria-hidden="true">⌄</span></span>
+        </button>
+        <div id="specialsContent" class="specials-content" hidden>
+          <div class="specials-controls">
+            <label>Retailer
+              <select id="specialsRetailer">
+                <option value="">All retailers</option>
+                <option value="pick-n-pay">Pick n Pay</option>
+                <option value="checkers">Checkers</option>
+                <option value="woolworths">Woolworths</option>
+                <option value="spar">SPAR</option>
+                <option value="makro">Makro</option>
+              </select>
+            </label>
+            <button class="primary compact" id="specialsRefreshBtn" type="button">Refresh specials</button>
+          </div>
+          <p id="specialsStatus" class="catalogue-status" aria-live="polite">Open to load current verified offers.</p>
+          <div id="specialsGrid" class="specials-grid"></div>
         </div>
-        <div class="specials-filters">
-          <label>Retailer
-            <select id="specialsRetailer">
-              <option value="">All retailers</option>
-              <option value="pick-n-pay">Pick n Pay</option>
-              <option value="checkers">Checkers</option>
-              <option value="woolworths">Woolworths</option>
-              <option value="spar">SPAR</option>
-              <option value="makro">Makro</option>
-            </select>
-          </label>
-          <p id="specialsStatus" class="catalogue-status" aria-live="polite">Loading verified specials...</p>
-        </div>
-        <div id="specialsGrid" class="specials-grid"></div>
       </section>
 
       <section class="workspace">
@@ -185,8 +187,14 @@
 
       <section class="results-pane">
         <div class="pane-header">
-          <h2>Latest Price Check</h2>
-          <div class="results-actions"><span id="scanStatus">Ready</span></div>
+          <div>
+            <h2>Compare Basket Totals</h2>
+            <p class="results-subhead">Totals update automatically whenever you change your basket.</p>
+          </div>
+          <div class="results-actions">
+            <span id="scanStatus">Add an item to begin</span>
+            <button class="primary compact" id="scanBtn" type="button">Scan prices</button>
+          </div>
         </div>
         <div id="pnpProgress" class="scan-progress" hidden>
           <div class="progress-copy">
@@ -199,7 +207,7 @@
         </div>
         <div id="basketTotals" class="basket-totals"></div>
         <div id="results" class="results-grid"></div>
-        <div id="emptyResults" class="empty-results"><strong>No basket scan yet.</strong><span>Add a few products, then select “Scan prices” to compare available totals.</span></div>
+        <div id="emptyResults" class="empty-results"><strong>No basket totals yet.</strong><span>Add a product and RandBasket will compare available totals automatically.</span></div>
       </section>
     </main>
 
@@ -271,6 +279,6 @@
       </div>
     </dialog>
 
-    <script src="app.js?v=24"></script>
+    <script src="app.js?v=26"></script>
   </body>
 </html>
