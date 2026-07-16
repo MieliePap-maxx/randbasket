@@ -225,6 +225,7 @@ function isStoreEligible(query: string, productCategory: string | undefined, sto
   if (!profile) return true;
   if (profile.category && productCategory && profile.category !== productCategory) return false;
   const offerText = clean([store.productName, store.brand, store.size].join(" "));
+  if (!matchesSearchTerm(offerText, profile.term)) return false;
   const hasExcludedTerm = parseJsonArray(profile.exclude_terms_json).some((term) => {
     const excluded = clean(term);
     return excluded && !normalizedQuery.includes(excluded) && offerText.includes(excluded);
@@ -254,7 +255,7 @@ export function parseMeasure(value: string | undefined) {
   }
   const perUnit = text.match(/\bper\s+(kg|g|ml|l)\b/);
   if (perUnit) return parseMeasure(`1 ${perUnit[1]}`);
-  const count = text.match(/\b(\d+(?:\.\d+)?)[\s-]*(?:pack|pk|count|ct|pieces?|units?|eggs?|s)\b/);
+  const count = text.match(/\b(\d+(?:\.\d+)?)[\s-]*(?:pack|pk|count|ct|pieces?|units?|eggs?|ea|s)\b/);
   if (count && Number(count[1]) > 0) return { amount: Number(count[1]), kind: "count" };
   if (/\bdozen\b/.test(text)) return { amount: 12, kind: "count" };
   return null;
@@ -347,6 +348,15 @@ function includesPhrase(text: string, phrase: string) {
   return ` ${clean(text)} `.includes(` ${clean(phrase)} `);
 }
 
+export function matchesSearchTerm(text: string, term: string) {
+  const normalizedTerm = clean(term);
+  const variants = new Set([normalizedTerm]);
+  if (normalizedTerm.endsWith("s")) variants.add(normalizedTerm.slice(0, -1));
+  if (normalizedTerm === "yoghurt") variants.add("yogurt");
+  if (normalizedTerm === "yogurt") variants.add("yoghurt");
+  return [...variants].some((variant) => includesPhrase(text, variant));
+}
+
 function eggSize(text: string) {
   const normalized = clean(text);
   if (!/\beggs?\b/.test(normalized)) return "";
@@ -364,6 +374,18 @@ function flourType(text: string) {
   return "";
 }
 
+function chickenForm(text: string) {
+  const normalized = clean(text);
+  if (!/\bchicken\b/.test(normalized)) return "";
+  if (/\b(?:mala|offal|giblets?|livers?|necks?|heads?|feet)\b/.test(normalized)) return "offal";
+  if (includesPhrase(normalized, "mixed portions") || includesPhrase(normalized, "chicken portions")) return "portions";
+  const cutHits = ["breast", "drumstick", "thigh", "wing", "fillet"]
+    .filter((cut) => new RegExp(`\\b${cut}s?\\b`).test(normalized));
+  if (cutHits.length > 1) return "portions";
+  if (includesPhrase(normalized, "whole chicken")) return "whole";
+  return cutHits[0] || "";
+}
+
 export function compareCharacteristics(referenceText: string, offerText: string) {
   const requestedEggSize = eggSize(referenceText);
   if (requestedEggSize && eggSize(offerText) !== requestedEggSize) {
@@ -371,6 +393,14 @@ export function compareCharacteristics(referenceText: string, offerText: string)
   }
   const requestedFlourType = flourType(referenceText);
   if (requestedFlourType && flourType(offerText) !== requestedFlourType) {
+    return { valid: false, matches: 0 };
+  }
+  const requestedChickenForm = chickenForm(referenceText);
+  const offeredChickenForm = chickenForm(offerText);
+  if (requestedChickenForm && offeredChickenForm !== requestedChickenForm) {
+    return { valid: false, matches: 0 };
+  }
+  if (includesPhrase(referenceText, "chicken") && !requestedChickenForm && offeredChickenForm === "offal") {
     return { valid: false, matches: 0 };
   }
   let matches = 0;

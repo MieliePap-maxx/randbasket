@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   compareCharacteristics,
+  matchesSearchTerm,
   normaliseForTarget,
   parseMeasure,
   sizeCompatibility,
@@ -43,6 +44,7 @@ measure("700g", { amount: 700, kind: "mass" });
 measure("1kg", { amount: 1000, kind: "mass" });
 measure("18-pack eggs", { amount: 18, kind: "count" });
 measure("18's large eggs", { amount: 18, kind: "count" });
+measure("18 ea", { amount: 18, kind: "count" });
 measure("per kg", { amount: 1000, kind: "mass" });
 
 assert.equal(sizeCompatibility("2L", "1L").valid, true);
@@ -66,9 +68,14 @@ invalidCharacteristics("large eggs 18 pack", "small eggs 18 pack");
 
 validCharacteristics("beef mince 1kg", "lean beef mince per kg");
 invalidCharacteristics("beef mince 1kg", "chicken mince 1kg");
+assert.equal(matchesSearchTerm("Tasty Nation Slow-cooked Beef Tripe 1kg", "mince"), false);
+assert.equal(matchesSearchTerm("Lean Beef Mince Per kg", "mince"), true);
 
 validCharacteristics("chicken portions 1kg", "fresh chicken portions 2kg");
+validCharacteristics("chicken portions 1kg", "4 chicken drumsticks and 4 thighs per kg");
 invalidCharacteristics("chicken portions 1kg", "pork portions 1kg");
+invalidCharacteristics("chicken portions 1kg", "frozen chicken mala 1kg");
+invalidCharacteristics("chicken portions 1kg", "whole chicken breast 1kg");
 
 validCharacteristics("cake flour 2.5kg", "wheat cake flour 2.5kg");
 validCharacteristics("cake flour 2.5kg", "cake wheat flour 2.5kg");
