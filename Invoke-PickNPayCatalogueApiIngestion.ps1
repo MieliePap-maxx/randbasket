@@ -179,6 +179,8 @@ foreach ($category in $categories) {
                     if ($promotion.$property) { $promoText = Clean-Text $promotion.$property; break }
                 }
             }
+            if (-not [string]::IsNullOrWhiteSpace($promoText)) { $promoApplied = $true }
+            $promoType = if ($regularPrice) { "sale" } elseif ($promoApplied) { "promotion" } else { "" }
 
             $targets = if ($rowsByCode.ContainsKey($code)) { @($rowsByCode[$code]) } else { @() }
             if ($targets.Count -eq 0) {
@@ -197,7 +199,7 @@ foreach ($category in $categories) {
                     price = $price
                     regularPrice = $regularPrice
                     promoText = $promoText
-                    promoType = $(if ($promoApplied) { "sale" } else { "" })
+                    promoType = $promoType
                     promoApplied = $promoApplied
                     imageUrl = Get-ImageUrl $product
                     url = "https://www.pnp.co.za/p/$code"
@@ -224,7 +226,7 @@ foreach ($category in $categories) {
                 Set-Prop $row "price" $price
                 Set-Prop $row "regularPrice" $regularPrice
                 Set-Prop $row "promoText" $promoText
-                Set-Prop $row "promoType" $(if ($promoApplied) { "sale" } else { "" })
+                Set-Prop $row "promoType" $promoType
                 Set-Prop $row "promoApplied" $promoApplied
                 Set-Prop $row "imageUrl" (Get-ImageUrl $product)
                 Set-Prop $row "available" [bool]$product.available

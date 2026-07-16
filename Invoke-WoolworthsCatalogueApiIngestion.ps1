@@ -47,6 +47,19 @@ function Repair-Text([string]$Value) {
     } catch { return $Value }
 }
 
+function Get-PromotionText($Data, $WasPrice) {
+    $messages = @(
+        @($Data.promo) |
+            ForEach-Object { Repair-Text (Clean-Text $_) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($messages.Count -gt 0) { return ($messages | Select-Object -Unique) -join " | " }
+    if ($WasPrice) { return "Woolworths sale" }
+    if ($Data.badges -and $Data.badges.SAVE) { return "Woolworths promotion" }
+    if ($Data.badges -and $Data.badges.LOWERPRICE) { return "Woolworths lower price" }
+    return ""
+}
+
 function New-SourceRow($Result) {
     $data = $Result.data
     $name = Repair-Text (Clean-Text $(if ($Result.value) { $Result.value } else { $data.description }))
@@ -57,6 +70,8 @@ function New-SourceRow($Result) {
     if ($null -eq $price) { $price = Get-Number $data.p60 }
     $wasPrice = Get-Number $data.p10_wp
     if ($null -eq $wasPrice -or $wasPrice -le $price) { $wasPrice = $null }
+    $promoText = Get-PromotionText $data $wasPrice
+    $promoApplied = -not [string]::IsNullOrWhiteSpace($promoText)
     $measure = Get-ProductMeasure $name $url $name
     return [pscustomobject]@{
         id = "woolworths-" + [string]$data.id
@@ -72,9 +87,9 @@ function New-SourceRow($Result) {
         unit = $(if ($measure) { $measure.unit } else { "" })
         price = $price
         regularPrice = $wasPrice
-        promoText = $(if ($wasPrice) { "Woolworths sale" } else { "" })
-        promoType = $(if ($wasPrice) { "sale" } else { "" })
-        promoApplied = [bool]$wasPrice
+        promoText = $promoText
+        promoType = $(if ($wasPrice) { "sale" } elseif ($promoApplied) { "promotion" } else { "" })
+        promoApplied = $promoApplied
         regionalPrices = [pscustomobject]@{
             p10 = Get-Number $data.p10
             p30 = Get-Number $data.p30
@@ -112,6 +127,8 @@ function Merge-Products($Existing, $Incoming) {
                 if ($existing.PSObject.Properties.Name -contains $prop.Name) { $existing.($prop.Name) = $prop.Value }
                 else { $existing | Add-Member -Force NoteProperty $prop.Name $prop.Value }
             }
+            if ($existing.PSObject.Properties.Name -contains "published") { $existing.published = $false }
+            else { $existing | Add-Member -Force NoteProperty "published" $false }
         } else {
             $byKey[$key] = $row
             $rows.Add($row)

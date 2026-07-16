@@ -6,7 +6,8 @@
     "deploy": "wrangler deploy",
     "test:matching": "node scripts/test-catalogue-matching.mjs",
     "db:migrate": "wrangler d1 execute randbasket-catalogue --file=schema.sql --remote",
-    "catalogue:export": "node scripts/export-catalogue-import.mjs"
+    "catalogue:export": "node scripts/export-catalogue-import.mjs",
+    "catalogue:woolworths-promotions": "node scripts/export-woolworths-promotions-import.mjs .wrangler/woolworths-promotions"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

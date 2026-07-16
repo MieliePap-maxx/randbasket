@@ -889,7 +889,8 @@ async function loadSpecials() {
   $("#specialsStatus").textContent = "Loading current verified offers...";
   try {
     const retailerQuery = retailer ? `&retailer=${encodeURIComponent(retailer)}` : "";
-    const payload = await api(`/v1/specials?limit=30${retailerQuery}${locationQuery()}`);
+    const balancedQuery = retailer ? "" : "&perRetailer=6";
+    const payload = await api(`/v1/specials?limit=30${balancedQuery}${retailerQuery}${locationQuery()}`);
     state.specials = payload.specials || [];
     state.specialsLoaded = true;
     $("#specialsStatus").textContent = state.specials.length

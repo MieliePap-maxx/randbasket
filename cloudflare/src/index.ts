@@ -128,6 +128,12 @@ function clean(text: unknown) {
     .replace(/\s+/g, " ");
 }
 
+export function normalizeRetailerId(value: unknown) {
+  const normalized = clean(value);
+  return retailers.find((retailer) =>
+    clean(retailer.id) === normalized || clean(retailer.name) === normalized)?.id || normalized.replace(/\s+/g, "-");
+}
+
 function tokens(text: string) {
   return [...new Set(clean(text).split(" ").filter((term) => term.length > 1))];
 }
@@ -811,7 +817,8 @@ async function categoriesResponse(request: Request, env: Env) {
 async function specialsResponse(request: Request, env: Env, url: URL) {
   const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "24", 10) || 24));
-  const retailer = clean(url.searchParams.get("retailer") || "");
+  const retailer = url.searchParams.get("retailer") ? normalizeRetailerId(url.searchParams.get("retailer")) : "";
+  const perRetailer = Math.min(12, Math.max(0, Number.parseInt(url.searchParams.get("perRetailer") || "0", 10) || 0));
   const category = String(url.searchParams.get("category") || "").trim().toLowerCase();
   const location = validLocation({ latitude: url.searchParams.get("latitude"), longitude: url.searchParams.get("longitude") });
   const clauses = ["o.promo_applied = 1", "o.price_cents IS NOT NULL", "o.price_cents > 0"];
@@ -824,7 +831,7 @@ async function specialsResponse(request: Request, env: Env, url: URL) {
     clauses.push("LOWER(p.category) = ?");
     bindings.push(category);
   }
-  const { results } = await env.DB.prepare(
+  const selectSpecials = (whereClauses: string[], values: string[], limit: number) => env.DB.prepare(
     `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text,
             o.product_id, o.retailer_id, o.retailer_name, o.product_name, o.brand, o.size_label,
             o.unit_label, o.price_cents, o.regular_price_cents, o.normalized_price_cents,
@@ -836,14 +843,23 @@ async function specialsResponse(request: Request, env: Env, url: URL) {
      ORDER BY
        CASE WHEN o.regular_price_cents > o.price_cents
          THEN CAST(o.regular_price_cents - o.price_cents AS REAL) / o.regular_price_cents
-         ELSE 0 END DESC,
+       ELSE 0 END DESC,
        o.last_seen_at DESC,
        p.canonical_name
-     LIMIT 500`,
-  ).bind(...bindings).all<ProductRow & OfferRow>();
+     LIMIT ${limit}`,
+  ).bind(...values).all<ProductRow & OfferRow>();
+  const results = !retailer && perRetailer > 0
+    ? (await Promise.all(retailers.map((store) =>
+      selectSpecials([...clauses, "o.retailer_id = ?"], [...bindings, store.id], 500))))
+      .flatMap((result) => result.results)
+    : (await selectSpecials(clauses, bindings, 500)).results;
   const visible = results.filter((offer) => isOfferVisibleAtLocation(offer, location));
   const start = (page - 1) * pageSize;
-  const specials = visible.slice(start, start + pageSize).map((row) => {
+  const selected = !retailer && perRetailer > 0
+    ? retailers.flatMap((store) =>
+      visible.filter((offer) => offer.retailer_id === store.id).slice(0, perRetailer))
+    : visible.slice(start, start + pageSize);
+  const specials = selected.map((row) => {
     const store = offerToStore(row, location);
     const saving = store.regularPrice && store.price != null
       ? Number((store.regularPrice - store.price).toFixed(2))
@@ -866,7 +882,8 @@ async function specialsResponse(request: Request, env: Env, url: URL) {
     ok: true,
     page,
     pageSize,
-    hasMore: visible.length > start + pageSize,
+    perRetailer: perRetailer || undefined,
+    hasMore: perRetailer > 0 ? false : visible.length > start + pageSize,
     locationApplied: Boolean(location),
     specials,
   });

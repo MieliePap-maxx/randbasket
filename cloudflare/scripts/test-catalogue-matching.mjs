@@ -3,6 +3,7 @@ import {
   categoryFamily,
   compareCharacteristics,
   matchesSearchTerm,
+  normalizeRetailerId,
   normaliseForTarget,
   parseMeasure,
   sizeCompatibility,
@@ -42,6 +43,9 @@ assert.equal(
   stripRetailerAliases("Pick n Pay Brown Bread 700g"),
   "brown bread 700 g",
 );
+assert.equal(normalizeRetailerId("pick-n-pay"), "pick-n-pay");
+assert.equal(normalizeRetailerId("Pick n Pay"), "pick-n-pay");
+assert.equal(normalizeRetailerId("WOOLWORTHS"), "woolworths");
 
 measure("2L", { amount: 2000, kind: "volume" });
 measure("6 x 1L", { amount: 6000, kind: "volume" });
