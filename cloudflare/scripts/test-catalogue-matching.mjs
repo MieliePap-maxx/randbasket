@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  categoryFamily,
   compareCharacteristics,
   matchesSearchTerm,
   normaliseForTarget,
@@ -33,6 +34,10 @@ assert.equal(
   stripRetailerAliases("PnP Full Cream Fresh Milk 2L"),
   "full cream fresh milk 2 l",
 );
+assert.equal(categoryFamily("Fresh Meat, Poultry & Seafood"), "meat");
+assert.equal(categoryFamily("Meat"), "meat");
+assert.equal(categoryFamily("Food Cupboard"), "pantry");
+assert.equal(categoryFamily("Frozen Food"), "frozen food");
 assert.equal(
   stripRetailerAliases("Pick n Pay Brown Bread 700g"),
   "brown bread 700 g",
@@ -68,6 +73,9 @@ invalidCharacteristics("large eggs 18 pack", "small eggs 18 pack");
 
 validCharacteristics("beef mince 1kg", "lean beef mince per kg");
 invalidCharacteristics("beef mince 1kg", "chicken mince 1kg");
+validCharacteristics("lean beef mince 1kg", "extra lean beef mince 1kg");
+invalidCharacteristics("lean beef mince 1kg", "savoury beef mince 400g");
+invalidCharacteristics("beef mince 1kg", "bolognaise beef mince with vegetables 400g");
 assert.equal(matchesSearchTerm("Tasty Nation Slow-cooked Beef Tripe 1kg", "mince"), false);
 assert.equal(matchesSearchTerm("Lean Beef Mince Per kg", "mince"), true);
 
@@ -76,6 +84,7 @@ validCharacteristics("chicken portions 1kg", "4 chicken drumsticks and 4 thighs 
 invalidCharacteristics("chicken portions 1kg", "pork portions 1kg");
 invalidCharacteristics("chicken portions 1kg", "frozen chicken mala 1kg");
 invalidCharacteristics("chicken portions 1kg", "whole chicken breast 1kg");
+invalidCharacteristics("chicken portions 1kg", "chicken breast fillet 1.5kg");
 
 validCharacteristics("cake flour 2.5kg", "wheat cake flour 2.5kg");
 validCharacteristics("cake flour 2.5kg", "cake wheat flour 2.5kg");

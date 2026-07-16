@@ -213,6 +213,16 @@ function scoreStore(query: string, product: ProductRow, store: { productName: st
   return score;
 }
 
+export function categoryFamily(value: string | undefined | null) {
+  const category = clean(value);
+  if (!category) return "";
+  if (/\b(?:meat|poultry|seafood)\b/.test(category)) return "meat";
+  if (/\b(?:dairy|milk|eggs?)\b/.test(category)) return "dairy";
+  if (/\b(?:bakery|bread)\b/.test(category)) return "bakery";
+  if (/\b(?:pantry|food cupboard)\b/.test(category)) return "pantry";
+  return category;
+}
+
 function isStoreEligible(query: string, productCategory: string | undefined, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
   const normalizedQuery = stripRetailerAliases(query);
   const requestedMeasure = parseMeasure(query);
@@ -223,7 +233,7 @@ function isStoreEligible(query: string, productCategory: string | undefined, sto
     .filter((entry) => normalizedQuery.includes(clean(entry.term)))
     .sort((a, b) => clean(b.term).length - clean(a.term).length)[0];
   if (!profile) return true;
-  if (profile.category && productCategory && profile.category !== productCategory) return false;
+  if (profile.category && productCategory && categoryFamily(profile.category) !== categoryFamily(productCategory)) return false;
   const offerText = clean([store.productName, store.brand, store.size].join(" "));
   if (!matchesSearchTerm(offerText, profile.term)) return false;
   const hasExcludedTerm = parseJsonArray(profile.exclude_terms_json).some((term) => {
@@ -379,11 +389,31 @@ function chickenForm(text: string) {
   if (!/\bchicken\b/.test(normalized)) return "";
   if (/\b(?:mala|offal|giblets?|livers?|necks?|heads?|feet)\b/.test(normalized)) return "offal";
   if (includesPhrase(normalized, "mixed portions") || includesPhrase(normalized, "chicken portions")) return "portions";
-  const cutHits = ["breast", "drumstick", "thigh", "wing", "fillet"]
+  if (/\b(?:breasts?|fillets?)\b/.test(normalized)) return "breast";
+  const cutHits = ["drumstick", "thigh", "wing"]
     .filter((cut) => new RegExp(`\\b${cut}s?\\b`).test(normalized));
   if (cutHits.length > 1) return "portions";
   if (includesPhrase(normalized, "whole chicken")) return "whole";
   return cutHits[0] || "";
+}
+
+function processedMinceTerms(text: string) {
+  const normalized = clean(text);
+  return [
+    "savoury",
+    "savory",
+    "bolognaise",
+    "chilli",
+    "curried",
+    "curry",
+    "soya",
+    "plant based",
+    "with vegetables",
+    "sauce",
+    "seasoning",
+    "dog food",
+    "cat food",
+  ].filter((term) => includesPhrase(normalized, term));
 }
 
 export function compareCharacteristics(referenceText: string, offerText: string) {
@@ -402,6 +432,17 @@ export function compareCharacteristics(referenceText: string, offerText: string)
   }
   if (includesPhrase(referenceText, "chicken") && !requestedChickenForm && offeredChickenForm === "offal") {
     return { valid: false, matches: 0 };
+  }
+  if (matchesSearchTerm(referenceText, "mince")) {
+    const referenceProcessed = processedMinceTerms(referenceText);
+    const offerProcessed = processedMinceTerms(offerText);
+    if (!referenceProcessed.length && offerProcessed.length) return { valid: false, matches: 0 };
+    if (includesPhrase(referenceText, "extra lean") && !includesPhrase(offerText, "extra lean")) {
+      return { valid: false, matches: 0 };
+    }
+    if (includesPhrase(referenceText, "lean") && !includesPhrase(offerText, "lean")) {
+      return { valid: false, matches: 0 };
+    }
   }
   let matches = 0;
   for (const group of characteristicGroups) {
@@ -491,7 +532,7 @@ async function findClosestBasketMatches(
   const comparisonQuery = stripRetailerAliases(String(item.comparisonQuery || item.query || item.name || ""));
   const referenceText = withoutBrand(String(item.selectedProductName || item.name || comparisonQuery), item.selectedBrand);
   const profile = matchingProfile(comparisonQuery, referenceText, profiles);
-  const targetCategory = clean(item.category || profile?.category || "");
+  const targetCategory = categoryFamily(item.category || profile?.category || "");
   const profileTerms = tokens(profile?.term || "");
   const queryTerms = tokens(comparisonQuery).filter((term) =>
     !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
@@ -538,7 +579,7 @@ async function findClosestBasketMatches(
       .filter((row) => isOfferVisibleAtLocation(row, location))
       .map((row) => {
         const store = offerToStore(row, location);
-        if (targetCategory && row.category && clean(row.category) !== targetCategory) return null;
+        if (targetCategory && row.category && categoryFamily(row.category) !== targetCategory) return null;
         if (store.price == null || !isStoreEligible(comparisonQuery, row.category || undefined, store, profiles)) return null;
         const offerText = clean([store.productName, store.brand, store.size, row.canonical_name, row.search_text].join(" "));
         const characteristics = compareCharacteristics(`${comparisonQuery} ${referenceText}`, offerText);
@@ -548,7 +589,7 @@ async function findClosestBasketMatches(
         const baseScore = scoreStore(comparisonQuery, row, store, profiles);
         if (baseScore <= 0) return null;
         const descriptorHits = descriptorTokens.filter((term) => offerText.includes(term)).length;
-        const categoryScore = !targetCategory || clean(row.category) === targetCategory ? 100 : 0;
+        const categoryScore = !targetCategory || categoryFamily(row.category) === targetCategory ? 100 : 0;
         const selectedProductBonus = item.selectedProductId === row.id ? 20 : 0;
         const matchScore = categoryScore
           + baseScore * 5
