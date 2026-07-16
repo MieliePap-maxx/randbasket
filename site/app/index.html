@@ -13,7 +13,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon.svg?v=2" />
     <link rel="icon" href="icon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=11" />
+    <link rel="stylesheet" href="styles.css?v=12" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
     <meta property="og:title" content="Compare Grocery Prices Online | RandBasket" />
@@ -47,7 +47,12 @@
       <nav class="app-nav-links" aria-label="App navigation">
         <a class="active" href="#compare" aria-current="page">Price Checker</a>
         <a href="#basket">My basket</a>
+        <a href="../how-to.html">How to use</a>
         <button id="feedbackOpenBtn" class="feedback-nav-btn" type="button">Suggestions</button>
+      </nav>
+      <button id="appMenuBtn" class="app-menu-btn" type="button" aria-expanded="false" aria-controls="appMobileMenu" aria-label="Open menu"><span></span><span></span><span></span></button>
+      <nav id="appMobileMenu" class="app-mobile-menu" aria-label="Mobile app navigation" hidden>
+        <a href="#compare">Price Checker</a><a href="#basket">My basket</a><a href="../how-to.html">How to use</a><a href="../faq.html">FAQ</a><a href="../support.html">Support</a><button id="mobileFeedbackBtn" type="button">Suggestions</button>
       </nav>
     </header>
 
@@ -60,6 +65,7 @@
           <div class="actions">
             <a class="hero-cta" href="#compare">Start comparing</a>
             <button class="hero-secondary" id="saveBtn" type="button">Save basket</button>
+            <button class="hero-secondary" id="shareBtn" type="button">Share basket</button>
             <button class="hero-secondary" id="scanBtn" type="button">Scan prices</button>
           </div>
         </div>
@@ -93,6 +99,7 @@
           <input id="catalogueSearchInput" type="search" autocomplete="off" placeholder="Search Full Cream Milk 2L, bacon, toothpaste..." />
         </div>
         <div id="catalogueStatus" class="catalogue-status" aria-live="polite"></div>
+        <div id="catalogueLoading" class="catalogue-loading" hidden aria-label="Loading product matches"><i></i><i></i><i></i></div>
         <div id="catalogueResults" class="catalogue-results"></div>
         <div id="cataloguePagination" class="catalogue-pagination" hidden>
           <button class="ghost compact" id="cataloguePreviousBtn" type="button">Previous</button>
@@ -140,6 +147,10 @@
               <tbody id="itemsBody"></tbody>
             </table>
           </div>
+          <div id="emptyBasket" class="empty-basket">
+            <div class="empty-basket-mark"><span>R</span></div>
+            <div><p class="eyebrow">Your basket is ready</p><h3>Add your first weekly staple.</h3><p>Search for a product, compare the available pack sizes and add the match you want.</p><div class="starter-searches"><button type="button" data-starter="full cream milk 2l">Milk</button><button type="button" data-starter="white bread 700g">Bread</button><button type="button" data-starter="eggs 18 pack">Eggs</button><button type="button" data-starter="beef mince 1kg">Mince</button><button type="button" data-starter="chicken portions 1kg">Chicken</button></div></div>
+          </div>
         </section>
       </section>
 
@@ -159,6 +170,7 @@
         </div>
         <div id="basketTotals" class="basket-totals"></div>
         <div id="results" class="results-grid"></div>
+        <div id="emptyResults" class="empty-results"><strong>No basket scan yet.</strong><span>Add a few products, then select “Scan prices” to compare available totals.</span></div>
       </section>
     </main>
 
@@ -219,7 +231,16 @@
         </div>
       </div>
     </dialog>
+    <dialog id="basketDialog" class="basket-dialog" aria-labelledby="basketDialogTitle">
+      <div class="basket-dialog-card">
+        <button id="basketDialogClose" class="dialog-close" type="button" aria-label="Close">&times;</button>
+        <p class="eyebrow">Saved baskets</p><h2 id="basketDialogTitle">Name this basket.</h2>
+        <div class="basket-save-row"><input id="basketNameInput" type="text" maxlength="50" placeholder="Weekly shop" /><button id="basketSaveNamedBtn" class="primary" type="button">Save</button></div>
+        <div id="savedBasketList" class="saved-basket-list"></div>
+        <p id="basketDialogStatus" class="status" aria-live="polite"></p>
+      </div>
+    </dialog>
 
-    <script src="app.js?v=21"></script>
+    <script src="app.js?v=22"></script>
   </body>
 </html>

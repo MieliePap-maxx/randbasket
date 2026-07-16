@@ -12,6 +12,7 @@ const state = {
 
 const API_ORIGIN = "https://api.randbasket.co.za";
 const STORAGE_KEY = "randbasket-web-state-v1";
+const SAVED_BASKETS_KEY = "randbasket-saved-baskets-v1";
 const FEEDBACK_EMAIL = "randbasketzar@gmail.com";
 const defaultStores = [
   { id: "pick-n-pay", name: "Pick n Pay" },
@@ -278,6 +279,8 @@ function renderItems() {
   const body = $("#itemsBody");
   body.innerHTML = "";
   state.items.forEach((item) => body.appendChild(itemRow(item)));
+  $("#emptyBasket").hidden = state.items.length > 0;
+  $(".table-wrap").hidden = state.items.length === 0;
 }
 
 function renderCatalogueResults() {
@@ -405,6 +408,7 @@ async function searchCatalogue(page = 1) {
   }
   const button = $("#catalogueSearchBtn");
   button.disabled = true;
+  $("#catalogueLoading").hidden = false;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
     const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${locationQuery()}`);
@@ -417,9 +421,11 @@ async function searchCatalogue(page = 1) {
       : "No priced catalogue matches yet.";
     renderCatalogueResults();
   } catch (error) {
-    $("#catalogueStatus").textContent = error.message;
+    $("#catalogueStatus").innerHTML = `We could not load product matches. <button class="inline-retry" type="button">Try again</button>`;
+    $("#catalogueStatus .inline-retry")?.addEventListener("click", () => searchCatalogue(page));
   } finally {
     button.disabled = false;
+    $("#catalogueLoading").hidden = true;
   }
 }
 
@@ -471,9 +477,10 @@ function renderResults() {
   wrap.innerHTML = "";
   renderBasketTotals(state.latest);
   if (!state.latest) {
-    wrap.innerHTML = `<div class="empty">Run a scan to compare this week's shelf prices.</div>`;
+    $("#emptyResults").hidden = false;
     return;
   }
+  $("#emptyResults").hidden = true;
   state.latest.scans.forEach((scan) => {
     const card = document.createElement("article");
     card.className = "result-card";
@@ -584,6 +591,11 @@ function startPickNPayProgress() {
 }
 
 async function runScan() {
+  if (!state.items.length) {
+    setText("#scanStatus", "Add at least one product before scanning prices.");
+    $("#emptyBasket").scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
   const button = $("#scanBtn");
   button.disabled = true;
   $("#scanStatus").textContent = "Saving basket...";
@@ -599,7 +611,8 @@ async function runScan() {
     updateSummary();
     renderResults();
   } catch (error) {
-    $("#scanStatus").textContent = error.message;
+    $("#scanStatus").innerHTML = `Price check failed. <button class="inline-retry" type="button">Try again</button>`;
+    $("#scanStatus .inline-retry")?.addEventListener("click", runScan);
   } finally {
     button.disabled = false;
   }
@@ -609,6 +622,91 @@ function addItem() {
   $("#catalogueSearchInput").focus();
   $("#catalogueSearchInput").scrollIntoView({ behavior: "smooth", block: "center" });
   $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
+}
+
+function getSavedBaskets() {
+  try { return JSON.parse(localStorage.getItem(SAVED_BASKETS_KEY) || "[]"); } catch { return []; }
+}
+
+function renderSavedBaskets() {
+  const wrap = $("#savedBasketList");
+  const baskets = getSavedBaskets();
+  wrap.innerHTML = baskets.length ? "" : `<div class="empty saved-empty">No named baskets saved yet.</div>`;
+  baskets.forEach((basket) => {
+    const row = document.createElement("div");
+    row.className = "saved-basket-row";
+    row.innerHTML = `<div><strong>${escapeHtml(basket.name)}</strong><span>${basket.items.length} items · ${new Date(basket.updatedAt).toLocaleDateString()}</span></div><div><button type="button" data-load="${basket.id}">Load</button><button type="button" data-delete="${basket.id}">Delete</button></div>`;
+    wrap.appendChild(row);
+  });
+}
+
+function openBasketDialog() {
+  renderSavedBaskets();
+  if (!$("#basketDialog").open) $("#basketDialog").showModal();
+}
+
+function saveNamedBasket() {
+  readItemsFromDom();
+  readSettingsFromDom();
+  if (!state.items.length) { setText("#basketDialogStatus", "Add at least one product before saving."); return; }
+  const name = $("#basketNameInput").value.trim();
+  if (!name) { setText("#basketDialogStatus", "Give this basket a name first."); return; }
+  const baskets = getSavedBaskets();
+  const old = baskets.find((basket) => basket.name.toLowerCase() === name.toLowerCase());
+  const entry = { id: old?.id || `${Date.now()}`, name, items: state.items, settings: state.settings, latest: state.latest, updatedAt: new Date().toISOString() };
+  localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify([entry, ...baskets.filter((basket) => basket.id !== entry.id)].slice(0, 20)));
+  setText("#basketDialogStatus", `${name} saved on this device.`);
+  renderSavedBaskets();
+}
+
+function loadSavedBasket(id) {
+  const basket = getSavedBaskets().find((entry) => entry.id === id);
+  if (!basket) return;
+  state.items = basket.items || [];
+  state.settings = basket.settings || state.settings;
+  state.latest = basket.latest || null;
+  renderStores(); renderLocation(); renderItems(); renderResults(); updateSummary(); saveDeviceState();
+  $("#basketDialog").close();
+}
+
+function deleteSavedBasket(id) {
+  localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify(getSavedBaskets().filter((entry) => entry.id !== id)));
+  renderSavedBaskets();
+}
+
+function shareBasket() {
+  readItemsFromDom();
+  if (!state.items.length) { setText("#scanStatus", "Add at least one product before sharing."); return; }
+  const cleanSettings = { ...state.settings };
+  delete cleanSettings.location;
+  const payload = btoa(unescape(encodeURIComponent(JSON.stringify({ items: state.items, settings: cleanSettings }))));
+  const url = `${location.origin}${location.pathname}?basket=${encodeURIComponent(payload)}`;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => setText("#scanStatus", "Share link copied"))
+      .catch(() => window.prompt("Copy this basket link:", url));
+  } else {
+    window.prompt("Copy this basket link:", url);
+  }
+}
+
+function importSharedBasket() {
+  const payload = new URLSearchParams(location.search).get("basket");
+  if (!payload) return;
+  try {
+    const shared = JSON.parse(decodeURIComponent(escape(atob(payload))));
+    if (!Array.isArray(shared.items)) return;
+    if (state.items.length && !window.confirm("Replace your current basket with the shared basket?")) {
+      history.replaceState({}, "", location.pathname + location.hash);
+      return;
+    }
+    state.items = shared.items;
+    state.settings = { ...state.settings, ...(shared.settings || {}) };
+    state.latest = null;
+    saveDeviceState();
+    history.replaceState({}, "", location.pathname + location.hash);
+    setText("#scanStatus", "Shared basket loaded");
+  } catch { setText("#scanStatus", "This shared basket link could not be opened."); }
 }
 
 function openFeedback() {
@@ -653,11 +751,29 @@ function submitFeedback(event) {
 
 function wireEvents() {
   $("#addItemBtn").addEventListener("click", addItem);
-  $("#saveBtn").addEventListener("click", async () => {
-    $("#scanStatus").textContent = "Saving...";
-    await saveAll();
-    $("#scanStatus").textContent = "Saved";
+  $("#saveBtn").addEventListener("click", openBasketDialog);
+  $("#shareBtn").addEventListener("click", shareBasket);
+  $("#basketDialogClose").addEventListener("click", () => $("#basketDialog").close());
+  $("#basketSaveNamedBtn").addEventListener("click", saveNamedBasket);
+  $("#savedBasketList").addEventListener("click", (event) => {
+    if (event.target.dataset.load) loadSavedBasket(event.target.dataset.load);
+    if (event.target.dataset.delete) deleteSavedBasket(event.target.dataset.delete);
   });
+  document.querySelectorAll("[data-starter]").forEach((button) => button.addEventListener("click", () => {
+    $("#catalogueSearchInput").value = button.dataset.starter;
+    $("#compare").scrollIntoView({ behavior: "smooth" });
+    searchCatalogue(1);
+  }));
+  $("#appMenuBtn").addEventListener("click", () => {
+    const menu = $("#appMobileMenu");
+    menu.hidden = !menu.hidden;
+    $("#appMenuBtn").setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  $("#appMobileMenu").addEventListener("click", () => {
+    $("#appMobileMenu").hidden = true;
+    $("#appMenuBtn").setAttribute("aria-expanded", "false");
+  });
+  $("#mobileFeedbackBtn").addEventListener("click", openFeedback);
   $("#scanBtn").addEventListener("click", runScan);
   $("#feedbackOpenBtn").addEventListener("click", openFeedback);
   $("#feedbackCloseBtn").addEventListener("click", closeFeedback);
@@ -699,6 +815,7 @@ async function init() {
   delete state.settings.location;
   state.stores = defaultStores;
   state.latest = saved.latest || null;
+  importSharedBasket();
   renderStores();
   renderLocation();
   renderItems();
@@ -719,6 +836,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=21").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=22").catch(() => {});
   });
 }

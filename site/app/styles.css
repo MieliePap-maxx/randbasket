@@ -100,6 +100,9 @@ a {
   align-items: center;
   gap: 6px;
 }
+.app-menu-btn { display: none; }
+.app-mobile-menu { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); display: grid; gap: 2px; padding: 8px; position: absolute; right: 16px; top: 62px; width: 220px; z-index: 30; }
+.app-mobile-menu[hidden] { display: none; }.app-mobile-menu a,.app-mobile-menu button { background: transparent; border: 0; border-radius: 10px; color: var(--ink); font: inherit; font-weight: 800; min-height: 42px; padding: 10px 12px; text-align: left; text-decoration: none; }.app-mobile-menu a:hover,.app-mobile-menu button:hover { background: var(--wash); }
 
 .app-nav-links a,
 .feedback-nav-btn {
@@ -406,6 +409,8 @@ button:disabled {
   font-size: 0.86rem;
   font-weight: 700;
 }
+.catalogue-loading { display: grid; gap: 12px; grid-template-columns: repeat(3, 1fr); margin-top: 14px; }.catalogue-loading[hidden] { display: none; }.catalogue-loading i { animation: skeleton 1.2s ease-in-out infinite alternate; background: linear-gradient(90deg,#edf2ee,#f8faf8,#edf2ee); border-radius: 16px; height: 108px; }.catalogue-loading i:nth-child(2) { animation-delay: .15s; }.catalogue-loading i:nth-child(3) { animation-delay: .3s; } @keyframes skeleton { to { opacity: .48; } }
+.inline-retry { background: transparent; border: 0; color: var(--green); font: inherit; font-weight: 900; padding: 0; text-decoration: underline; }
 
 .catalogue-results {
   display: grid;
@@ -608,6 +613,9 @@ button:disabled {
   scroll-margin-top: 92px;
   min-width: 0;
 }
+.empty-basket { align-items: center; background: linear-gradient(145deg,#f7faf7,#edf4ef); border: 1px dashed #b9cbbf; border-radius: 18px; display: grid; gap: 24px; grid-template-columns: 100px 1fr; min-height: 285px; padding: 32px; }.empty-basket[hidden] { display: none; }.empty-basket-mark { align-items: center; background: var(--green-dark); border: 8px solid #c8ddd0; border-radius: 50%; color: #fff; display: flex; height: 90px; justify-content: center; width: 90px; }.empty-basket-mark span { font-size: 2.2rem; font-weight: 900; }.empty-basket h3 { font-size: 1.6rem; margin-bottom: 8px; }.empty-basket p:not(.eyebrow) { color: var(--muted); }.starter-searches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }.starter-searches button { background: #fff; border: 1px solid var(--line); border-radius: 999px; color: var(--green-dark); min-height: 36px; padding: 7px 12px; }
+.empty-results { align-items: center; border: 1px dashed var(--line); border-radius: 16px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; padding: 28px; text-align: center; }.empty-results[hidden] { display: none; }.empty-results strong { color: var(--ink); }
+.basket-dialog { width: min(620px,calc(100vw - 24px)); border: 0; border-radius: 24px; padding: 0; }.basket-dialog::backdrop { background: rgba(5,32,24,.65); }.basket-dialog-card { padding: 30px; position: relative; }.basket-dialog-card h2 { font-size: 2rem; }.basket-save-row { display: grid; gap: 10px; grid-template-columns: 1fr auto; }.saved-basket-list { display: grid; gap: 8px; margin-top: 22px; }.saved-basket-row { align-items: center; border: 1px solid var(--line); border-radius: 12px; display: flex; justify-content: space-between; padding: 13px; }.saved-basket-row span { color: var(--muted); display: block; font-size: .72rem; }.saved-basket-row button { background: transparent; border: 0; color: var(--green); min-height: 34px; padding: 6px 8px; }.saved-empty { padding: 18px; }
 
 .pane-header {
   align-items: center;
@@ -1268,9 +1276,8 @@ td.remove {
     font-size: 0.98rem;
   }
 
-  .app-nav-links a {
-    display: none;
-  }
+  .app-nav-links { display: none; }
+  .app-menu-btn { align-items: center; background: var(--wash); border: 0; border-radius: 10px; display: flex; flex-direction: column; gap: 4px; height: 40px; justify-content: center; padding: 0; width: 40px; }.app-menu-btn span { background: var(--green-dark); border-radius: 2px; height: 2px; width: 19px; }
 
   .feedback-nav-btn {
     min-height: 36px;
@@ -1414,6 +1421,7 @@ td.remove {
     grid-template-columns: 64px minmax(0, 1fr);
     min-height: 92px;
   }
+  .catalogue-loading { grid-template-columns: 1fr; }.catalogue-loading i:nth-child(n+2) { display: none; }.empty-basket { grid-template-columns: 1fr; padding: 24px; }.basket-save-row { grid-template-columns: 1fr; }.saved-basket-row { align-items: flex-start; flex-direction: column; gap: 8px; width: 100%; }
 
   .catalogue-price {
     grid-column: 2;
