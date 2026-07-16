@@ -1,4 +1,4 @@
-const CACHE_NAME = "randbasket-web-v27";
+const CACHE_NAME = "randbasket-web-v28";
 const STATIC_ASSETS = [
   "./",
   "./index.html",

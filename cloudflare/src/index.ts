@@ -614,7 +614,14 @@ async function findClosestBasketMatches(
   return matches;
 }
 
-async function findCatalogue(env: Env, query: string, page: number, pageSize: number, location?: ShopperLocation) {
+async function findCatalogue(
+  env: Env,
+  query: string,
+  page: number,
+  pageSize: number,
+  location?: ShopperLocation,
+  perRetailer = 0,
+) {
   query = stripRetailerAliases(query);
   const queryTokens = tokens(query);
   if (!queryTokens.length) return { products: [], retailerMatches: [], hasMore: false };
@@ -750,6 +757,22 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
       return !leaderKeys.has(`${store.storeId}|${clean(store.productName)}`);
     }),
   ];
+  if (perRetailer > 0) {
+    const groupedMatches = retailers.flatMap((retailer) =>
+      valueRankedMatches
+        .filter((product) => product.stores[0]?.storeId === retailer.id)
+        .slice(0, perRetailer));
+    const retailerHasMore = Object.fromEntries(retailers.map((retailer) => [
+      retailer.id,
+      valueRankedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length > perRetailer,
+    ]));
+    return {
+      products: groupedMatches,
+      retailerMatches: groupedMatches,
+      retailerHasMore,
+      hasMore: false,
+    };
+  }
   const start = (page - 1) * pageSize;
   const pageMatches = retailerMatches.slice(start, start + pageSize);
   return {
@@ -763,9 +786,18 @@ async function catalogueResponse(request: Request, env: Env, url: URL) {
   const query = (url.searchParams.get("q") || "").trim();
   const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "10", 10) || 10));
+  const perRetailer = Math.min(12, Math.max(0, Number.parseInt(url.searchParams.get("perRetailer") || "0", 10) || 0));
   const location = validLocation({ latitude: url.searchParams.get("latitude"), longitude: url.searchParams.get("longitude") });
-  const result = await findCatalogue(env, query, page, pageSize, location);
-  return json(request, env, { ok: true, query, page, pageSize, locationApplied: Boolean(location), ...result });
+  const result = await findCatalogue(env, query, page, pageSize, location, perRetailer);
+  return json(request, env, {
+    ok: true,
+    query,
+    page,
+    pageSize,
+    perRetailer: perRetailer || undefined,
+    locationApplied: Boolean(location),
+    ...result,
+  });
 }
 
 async function categoriesResponse(request: Request, env: Env) {

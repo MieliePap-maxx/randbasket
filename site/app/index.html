@@ -107,12 +107,8 @@
         </div>
         <div id="catalogueStatus" class="catalogue-status" aria-live="polite"></div>
         <div id="catalogueLoading" class="catalogue-loading" hidden aria-label="Loading product matches"><i></i><i></i><i></i></div>
+        <div id="catalogueRetailerTabs" class="catalogue-retailer-tabs" role="tablist" aria-label="Choose a retailer" hidden></div>
         <div id="catalogueResults" class="catalogue-results"></div>
-        <div id="cataloguePagination" class="catalogue-pagination" hidden>
-          <button class="ghost compact" id="cataloguePreviousBtn" type="button">Previous</button>
-          <span id="cataloguePageLabel">Page 1</span>
-          <button class="ghost compact" id="catalogueMoreBtn" type="button">More matches</button>
-        </div>
       </section>
 
       <section class="specials-pane" id="specials" aria-label="Current grocery catalogues and specials">
@@ -149,7 +145,7 @@
             <h2>Value Settings</h2>
           </div>
           <label>
-            Product matches per store
+            Matches shown per retailer
             <input id="maxResultsInput" type="number" min="1" max="12" step="1" />
           </label>
           <div class="location-setting">
