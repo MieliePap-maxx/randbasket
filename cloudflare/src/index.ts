@@ -73,6 +73,7 @@ type BasketItem = {
   selectedProductId?: string;
   selectedProductName?: string;
   selectedBrand?: string;
+  imageUrl?: string;
   links?: Record<string, string>;
 };
 
@@ -1022,6 +1023,7 @@ async function scanBasket(request: Request, env: Env) {
         lineTotal: normalizedPrice == null ? null : Number((normalizedPrice * quantity).toFixed(2)),
         productName: store?.productName || null,
         productUrl: store?.url || null,
+        imageUrl: store?.imageUrl || null,
         productMeasure: store?.size ? { label: store.size } : null,
         matchedProductId: linkedOffer?.product_id || closest?.product.id || null,
         matchScore: linkedOffer ? null : closest?.matchScore ?? null,

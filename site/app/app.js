@@ -269,6 +269,27 @@ function buildComparisonQuery(product, store, preferredQuery = "") {
   return query;
 }
 
+function productImageMarkup(imageUrl, productName, className) {
+  const initial = cleanDisplayText(productName).charAt(0).toUpperCase() || "R";
+  const image = imageUrl
+    ? `<img data-product-image src="${escapeAttr(imageUrl)}" alt="${escapeAttr(productName)}" loading="lazy" />`
+    : "";
+  return `
+    <span class="${className}">
+      <span class="product-image-fallback" aria-hidden="true">${escapeHtml(initial)}</span>
+      ${image}
+    </span>
+  `;
+}
+
+function watchProductImages(root = document) {
+  root.querySelectorAll("img[data-product-image]").forEach((image) => {
+    image.addEventListener("error", () => {
+      image.hidden = true;
+    }, { once: true });
+  });
+}
+
 function updateSummary() {
   setText("#itemCount", state.items.length);
   const maxResultsInput = $("#maxResultsInput");
@@ -306,7 +327,12 @@ function itemRow(item) {
     || "Choose from search";
   const details = [item.targetSize, item.category].filter(Boolean).join(" - ");
   tr.innerHTML = `
-    <td class="item-name" data-label="Product"><div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div></td>
+    <td class="item-name" data-label="Product">
+      <div class="basket-product-layout">
+        ${productImageMarkup(item.imageUrl, item.name, "basket-product-image")}
+        <div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div>
+      </div>
+    </td>
     <td class="basket-store-cell" data-label="Retailer"><span class="basket-store">${escapeHtml(storeName)}</span></td>
     <td class="basket-price-cell" data-label="Price"><strong class="basket-price">${formatMoney(item.selectedPrice)}</strong></td>
     <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" min="0.1" step="0.1" value="${item.quantity || 1}" /></td>
@@ -327,6 +353,7 @@ function renderItems() {
   const body = $("#itemsBody");
   body.innerHTML = "";
   state.items.forEach((item) => body.appendChild(itemRow(item)));
+  watchProductImages(body);
   $("#emptyBasket").hidden = state.items.length > 0;
   $(".table-wrap").hidden = state.items.length === 0;
 }
@@ -444,6 +471,7 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
     selectedProductId: product.id,
     selectedProductName: productName,
     selectedBrand: store.brand || "",
+    imageUrl: store.imageUrl || "",
     selectedStoreId: store.storeId,
     selectedStoreName: store.storeName,
     selectedPrice: store.price,
@@ -540,14 +568,18 @@ function renderResults() {
       wrap.innerHTML = state.items.map((item) => `
         <article class="result-card">
           <div class="result-head">
-            <div>
+            <div class="result-product-heading">
+              ${productImageMarkup(item.imageUrl, item.name, "result-product-image")}
+              <div>
               <h3>${escapeHtml(item.name)}</h3>
               <div class="status">${escapeHtml(item.comparisonQuery || item.query || item.name)} - finding closest retailer matches...</div>
+              </div>
             </div>
             <span class="badge">Updating</span>
           </div>
         </article>
       `).join("");
+      watchProductImages(wrap);
     }
     return;
   }
@@ -555,6 +587,10 @@ function renderResults() {
   state.latest.scans.forEach((scan) => {
     const card = document.createElement("article");
     card.className = "result-card";
+    const basketItem = state.items.find((item) => item.id === scan.itemId);
+    const selectedResult = scan.results.find((result) => result.storeId === basketItem?.selectedStoreId && result.imageUrl)
+      || scan.results.find((result) => result.imageUrl);
+    const basketImageUrl = basketItem?.imageUrl || selectedResult?.imageUrl || "";
     const rows = scan.results
       .map((result) => {
         const isBest = scan.bestStoreId === result.storeId;
@@ -581,11 +617,14 @@ function renderResults() {
           : `<span class="direct-url muted">No direct link available</span>`;
         return `
           <div class="price-row ${isBest ? "best" : ""}">
-            <div class="supplier-result">
-              <strong>${result.storeName}</strong>
-              <small>${escapeHtml(product)}</small>
-              ${dealLine}
-              ${linkHtml}
+            <div class="supplier-result-layout">
+              ${productImageMarkup(result.imageUrl, result.productName || `${result.storeName} product`, "result-match-image")}
+              <div class="supplier-result">
+                <strong>${result.storeName}</strong>
+                <small>${escapeHtml(product)}</small>
+                ${dealLine}
+                ${linkHtml}
+              </div>
             </div>
             <div class="price">${wasPrice}${formatMoney(result.effectivePrice)}</div>
           </div>
@@ -594,15 +633,19 @@ function renderResults() {
       .join("");
     card.innerHTML = `
       <div class="result-head">
-        <div>
-          <h3>${escapeHtml(scan.name)}</h3>
-          <div class="status">${escapeHtml(scan.query)}${scan.targetMeasure?.label ? ` - target ${escapeHtml(scan.targetMeasure.label)}` : ""} - qty ${scan.quantity}</div>
+        <div class="result-product-heading">
+          ${productImageMarkup(basketImageUrl, scan.name, "result-product-image")}
+          <div>
+            <h3>${escapeHtml(scan.name)}</h3>
+            <div class="status">${escapeHtml(scan.query)}${scan.targetMeasure?.label ? ` - target ${escapeHtml(scan.targetMeasure.label)}` : ""} - qty ${scan.quantity}</div>
+          </div>
         </div>
         <span class="badge">${scan.bestStoreName || "No match"}</span>
       </div>
       ${rows}
     `;
     wrap.appendChild(card);
+    watchProductImages(card);
   });
 }
 
@@ -684,6 +727,21 @@ function scheduleBasketScan(delay = 500) {
   }, delay);
 }
 
+function backfillBasketImages(scan) {
+  let changed = false;
+  state.items = state.items.map((item) => {
+    if (item.imageUrl) return item;
+    const itemScan = scan?.scans?.find((entry) => entry.itemId === item.id);
+    const preferred = itemScan?.results?.find((result) =>
+      result.storeId === item.selectedStoreId && result.imageUrl);
+    const available = preferred || itemScan?.results?.find((result) => result.imageUrl);
+    if (!available?.imageUrl) return item;
+    changed = true;
+    return { ...item, imageUrl: available.imageUrl };
+  });
+  return changed;
+}
+
 async function runScan({ automatic = false } = {}) {
   readItemsFromDom();
   readSettingsFromDom();
@@ -712,6 +770,7 @@ async function runScan({ automatic = false } = {}) {
       method: "POST",
       body: JSON.stringify({ items: state.items, settings: state.settings }),
     });
+    if (backfillBasketImages(state.latest)) renderItems();
     await saveAll();
     $("#scanStatus").textContent = `Updated ${new Date(state.latest.createdAt).toLocaleString()}`;
     updateSummary();
@@ -1067,7 +1126,8 @@ async function init() {
   wireEvents();
   if (state.latest?.createdAt) {
     setText("#scanStatus", `Updated ${new Date(state.latest.createdAt).toLocaleString()}`);
-  } else if (state.items.length) {
+  }
+  if (state.items.length && (!state.latest || state.items.some((item) => !item.imageUrl))) {
     scheduleBasketScan(250);
   }
   if (window.location.hash === "#suggestions") {
