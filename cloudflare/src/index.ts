@@ -1832,20 +1832,96 @@ async function scanBasket(request: Request, env: Env) {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-    const url = new URL(request.url);
-    if (request.method === "GET" && ["/v1/health", "/health"].includes(url.pathname)) {
-      return json(request, env, { ok: true, service: "randbasket-api", now: new Date().toISOString() });
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders(request, env),
+      });
     }
-    if (request.method === "POST" && url.pathname === "/v1/admin/vector-index") {
+
+    const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/") {
+      return json(request, env, {
+        ok: true,
+        service: "randbasket-api",
+        message: "RandBasket API is online.",
+        endpoints: {
+          health: "/v1/health",
+          catalogue: "/v1/catalogue?q=milk",
+          categories: "/v1/catalogue/categories",
+          specials: "/v1/specials",
+        },
+      });
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/health", "/health"].includes(url.pathname)
+    ) {
+      return json(request, env, {
+        ok: true,
+        service: "randbasket-api",
+        now: new Date().toISOString(),
+      });
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/admin/vector-index"
+    ) {
       return indexProductVectorsResponse(request, env);
     }
-    if (request.method === "GET" && ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)) return catalogueResponse(request, env, url);
-    if (request.method === "GET" && ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(url.pathname)) return categoriesResponse(request, env);
-    if (request.method === "GET" && ["/v1/specials", "/api/specials"].includes(url.pathname)) return specialsResponse(request, env, url);
-    if (request.method === "POST" && ["/v1/catalogue/request", "/api/catalogue/request"].includes(url.pathname)) return queueRequest(request, env);
-    if (request.method === "POST" && ["/v1/feedback", "/api/feedback"].includes(url.pathname)) return submitFeedback(request, env);
-    if (request.method === "POST" && ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)) return scanBasket(request, env);
-    return json(request, env, { ok: false, error: "Not found" }, 404);
+
+    if (
+      request.method === "GET" &&
+      ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)
+    ) {
+      return catalogueResponse(request, env, url);
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(
+        url.pathname,
+      )
+    ) {
+      return categoriesResponse(request, env);
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/specials", "/api/specials"].includes(url.pathname)
+    ) {
+      return specialsResponse(request, env, url);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/catalogue/request", "/api/catalogue/request"].includes(
+        url.pathname,
+      )
+    ) {
+      return queueRequest(request, env);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/feedback", "/api/feedback"].includes(url.pathname)
+    ) {
+      return submitFeedback(request, env);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)
+    ) {
+      return scanBasket(request, env);
+    }
+
+    return json(request, env, {
+      ok: false,
+      error: "Not found",
+    }, 404);
   },
 };
