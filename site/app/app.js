@@ -15,6 +15,9 @@ const API_ORIGIN = "https://api.randbasket.co.za";
 const STORAGE_KEY = "randbasket-web-state-v1";
 const SAVED_BASKETS_KEY = "randbasket-saved-baskets-v1";
 const FEEDBACK_EMAIL = "randbasketzar@gmail.com";
+const TURNSTILE_SITE_KEY = "0x4AAAAAAD3NsfAYMYxlQRFS";
+let feedbackTurnstileWidgetId = null;
+let feedbackTurnstileToken = "";
 const defaultStores = [
   { id: "pick-n-pay", name: "Pick n Pay" },
   { id: "checkers", name: "Checkers" },
@@ -769,11 +772,50 @@ function importSharedBasket() {
   } catch { setText("#scanStatus", "This shared basket link could not be opened."); }
 }
 
+function renderFeedbackTurnstile(attempt = 0) {
+  if (!window.turnstile) {
+    if (attempt < 40) window.setTimeout(() => renderFeedbackTurnstile(attempt + 1), 100);
+    else $("#feedbackStatus").textContent = "The security check could not load. Please refresh and try again.";
+    return;
+  }
+  if (feedbackTurnstileWidgetId !== null) {
+    window.turnstile.reset(feedbackTurnstileWidgetId);
+    feedbackTurnstileToken = "";
+    return;
+  }
+  feedbackTurnstileWidgetId = window.turnstile.render("#feedbackTurnstile", {
+    sitekey: TURNSTILE_SITE_KEY,
+    action: "feedback",
+    theme: "auto",
+    size: "flexible",
+    callback(token) {
+      feedbackTurnstileToken = token;
+    },
+    "expired-callback"() {
+      feedbackTurnstileToken = "";
+    },
+    "error-callback"() {
+      feedbackTurnstileToken = "";
+      $("#feedbackStatus").textContent = "The security check failed to load. Please try again.";
+    },
+  });
+}
+
+function resetFeedbackTurnstile() {
+  feedbackTurnstileToken = "";
+  if (window.turnstile && feedbackTurnstileWidgetId !== null) {
+    window.turnstile.reset(feedbackTurnstileWidgetId);
+  }
+}
+
 function openFeedback() {
   const dialog = $("#feedbackDialog");
   $("#feedbackContext").value = `${window.location.origin}${window.location.pathname}`;
   $("#feedbackStatus").innerHTML = `Prefer email? <a href="mailto:${FEEDBACK_EMAIL}">${FEEDBACK_EMAIL}</a>`;
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) {
+    dialog.showModal();
+    renderFeedbackTurnstile();
+  }
 }
 
 function closeFeedback() {
@@ -787,15 +829,21 @@ function submitFeedback(event) {
   const button = $("#feedbackSubmitBtn");
   const status = $("#feedbackStatus");
   $("#feedbackContext").value = `${window.location.origin}${window.location.pathname}`;
+  if (!feedbackTurnstileToken) {
+    status.textContent = "Please complete the security check.";
+    return;
+  }
   button.disabled = true;
   button.textContent = "Sending...";
   status.textContent = "Sending your suggestion to RandBasket...";
   const fields = Object.fromEntries(new FormData(form).entries());
+  fields.turnstileToken = feedbackTurnstileToken;
   api("/v1/feedback", {
     method: "POST",
     body: JSON.stringify(fields),
   }).then(() => {
     form.reset();
+    resetFeedbackTurnstile();
     status.textContent = "Thank you - your suggestion has been emailed to RandBasket.";
     button.textContent = "Sent";
     window.setTimeout(() => {
@@ -803,6 +851,7 @@ function submitFeedback(event) {
       button.disabled = false;
     }, 1400);
   }).catch((error) => {
+    resetFeedbackTurnstile();
     status.textContent = error.message;
     button.textContent = "Try again";
     button.disabled = false;

@@ -14,7 +14,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
     <link rel="apple-touch-icon" href="/favicon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=12" />
+    <link rel="stylesheet" href="styles.css?v=13" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
     <meta property="og:title" content="Compare Grocery Prices Online | RandBasket" />
@@ -22,6 +22,7 @@
     <meta property="og:url" content="https://randbasket.co.za/app/" />
     <meta property="og:image" content="https://randbasket.co.za/assets/randbasket-groceries.png" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -237,6 +238,7 @@
         <label>Your suggestion
           <textarea name="message" rows="6" required minlength="5" placeholder="Tell us what would make RandBasket better for you..."></textarea>
         </label>
+        <div id="feedbackTurnstile" class="feedback-turnstile" aria-label="Security verification"></div>
         <div class="feedback-actions">
           <p id="feedbackStatus" aria-live="polite">Prefer email? <a href="mailto:randbasketzar@gmail.com">randbasketzar@gmail.com</a></p>
           <button id="feedbackSubmitBtn" class="feedback-submit" type="submit">Send suggestion</button>
@@ -269,6 +271,6 @@
       </div>
     </dialog>
 
-    <script src="app.js?v=23"></script>
+    <script src="app.js?v=24"></script>
   </body>
 </html>

@@ -1304,6 +1304,11 @@ td.remove {
   margin-top: 8px;
 }
 
+.feedback-turnstile {
+  min-height: 65px;
+  width: 100%;
+}
+
 .feedback-actions p {
   margin: 0;
   color: var(--muted);

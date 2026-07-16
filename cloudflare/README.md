@@ -44,6 +44,16 @@ node scripts/export-catalogue-import.mjs `
 6. Run each generated `catalogue-*.sql` file and then `search-profiles.sql` with `wrangler d1 execute ... --remote --file=<file>`.
 7. Deploy the Worker with `npx wrangler deploy`, then add `api.randbasket.co.za` as its custom domain in the Worker settings.
 
+## Turnstile
+
+The public Suggestions form uses Cloudflare Turnstile. Store the private key as a Worker secret; never add it to `wrangler.toml` or commit it:
+
+```powershell
+npx wrangler secret put TURNSTILE_SECRET_KEY
+```
+
+The public site key is included in the web client. The Worker validates every feedback token with Cloudflare Siteverify before saving or emailing the submission.
+
 ## API endpoints
 
 - `GET /v1/health`

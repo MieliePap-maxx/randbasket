@@ -11,7 +11,15 @@ export interface Env {
   };
   FEEDBACK_FROM: string;
   FEEDBACK_TO: string;
+  TURNSTILE_SECRET_KEY: string;
 }
+
+type TurnstileVerification = {
+  success: boolean;
+  hostname?: string;
+  action?: string;
+  "error-codes"?: string[];
+};
 
 type ProductRow = {
   id: string;
@@ -547,8 +555,42 @@ async function submitFeedback(request: Request, env: Env) {
     message?: string;
     page?: string;
     honeypot?: string;
+    turnstileToken?: string;
   }>().catch(() => ({}));
   if (String(body.honeypot || "").trim()) return json(request, env, { ok: true }, 202);
+
+  const turnstileToken = String(body.turnstileToken || "").trim();
+  if (!turnstileToken) {
+    return json(request, env, { ok: false, error: "Please complete the security check." }, 400);
+  }
+
+  let verification: TurnstileVerification;
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret: env.TURNSTILE_SECRET_KEY,
+        response: turnstileToken,
+        remoteip: request.headers.get("CF-Connecting-IP") || undefined,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    });
+    verification = await response.json<TurnstileVerification>();
+  } catch (error) {
+    console.error("Turnstile verification request failed", error);
+    return json(request, env, { ok: false, error: "The security check is temporarily unavailable. Please try again." }, 503);
+  }
+
+  const allowedHostnames = new Set(["randbasket.co.za", "www.randbasket.co.za"]);
+  if (!verification.success || verification.action !== "feedback" || !verification.hostname || !allowedHostnames.has(verification.hostname)) {
+    console.warn("Turnstile verification rejected", {
+      hostname: verification.hostname,
+      action: verification.action,
+      errors: verification["error-codes"],
+    });
+    return json(request, env, { ok: false, error: "Security verification failed. Please try again." }, 403);
+  }
 
   const name = String(body.name || "").trim().slice(0, 120);
   const email = String(body.email || "").trim().slice(0, 254);
