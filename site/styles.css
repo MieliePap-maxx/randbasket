@@ -265,3 +265,15 @@ footer a { color: var(--ink); text-decoration: none; }
 .guide-finish { align-items: center; background: var(--ink); border-radius: 28px; color: #fff; display: grid; gap: 30px; grid-template-columns: 1fr auto; margin-top: 68px; padding: 46px; }.guide-finish .eyebrow { color: #9ed8b6; }.guide-finish h2 { font-family: Georgia, serif; font-size: 3rem; font-weight: 500; }.guide-finish p:last-child { color: #c7d6ce; margin: 0; }
 @media (max-width: 850px) { .guide-hero,.guide-step { grid-template-columns: 1fr; }.guide-hero-card { max-width: 360px; }.guide-step:nth-child(even) .guide-copy,.guide-step:nth-child(even) .guide-visual { order: initial; }.guide-finish { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .guide-main { padding: 0 16px 60px; }.guide-hero { gap: 45px; padding: 55px 4px; }.guide-hero h1 { font-size: 3.5rem; }.guide-step { border-radius: 20px; min-height: 0; padding: 26px 18px; }.guide-visual { min-height: 290px; padding: 18px; }.product-demo { grid-template-columns: 85px 1fr; }.mock-product-image { height: 125px; }.mock-table-row { grid-template-columns: 1fr 70px 34px; }.guide-finish { padding: 32px 24px; } }
+
+@media (max-width: 720px) {
+  .weekly-prices {
+    left: 50%;
+    transform: translateX(-50%) rotate(-2deg);
+  }
+
+  .hero-stamp {
+    left: 50%;
+    transform: translateX(-50%) rotate(-8deg);
+  }
+}

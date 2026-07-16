@@ -8,16 +8,20 @@ const state = {
   catalogueRetailerMatches: [],
   catalogueQuery: "",
   activeCatalogueRetailer: "pick-n-pay",
+  activeBasketRetailer: "",
   specials: [],
   specialsLoaded: false,
   autoScanTimer: null,
   scanInFlight: false,
   scanQueued: false,
+  itemSuggestionTimer: null,
+  itemSuggestionController: null,
 };
 
 const API_ORIGIN = "https://api.randbasket.co.za";
 const STORAGE_KEY = "randbasket-web-state-v1";
 const SAVED_BASKETS_KEY = "randbasket-saved-baskets-v1";
+const ITEM_SEARCH_HISTORY_KEY = "randbasket-item-search-history-v1";
 const FEEDBACK_EMAIL = "randbasketzar@gmail.com";
 const TURNSTILE_SITE_KEY = "0x4AAAAAAD3NsfAYMYxlQRFS";
 let feedbackTurnstileWidgetId = null;
@@ -28,6 +32,22 @@ const defaultStores = [
   { id: "woolworths", name: "Woolworths" },
   { id: "spar", name: "SPAR" },
   { id: "makro", name: "Makro" },
+];
+const defaultItemSuggestions = [
+  "Full cream milk 2L",
+  "White bread 700g",
+  "Eggs 18 pack",
+  "Beef mince 1kg",
+  "Chicken portions 1kg",
+  "Cake flour 2.5kg",
+  "Plain yoghurt 1kg",
+  "Streaky bacon 200g",
+  "White sugar 2.5kg",
+  "Rice 2kg",
+  "Sunflower oil 2L",
+  "Instant coffee 200g",
+  "Black tea 100 bags",
+  "Toothpaste 100ml",
 ];
 
 const moneyFmt = new Intl.NumberFormat("en-ZA", {
@@ -61,6 +81,87 @@ async function api(path, options = {}) {
 
 function formatMoney(value) {
   return value == null ? "-" : moneyFmt.format(value);
+}
+
+function wholeQuantity(value) {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) ? Math.max(1, Math.round(quantity)) : 1;
+}
+
+function setCatalogueNotice(message, tone = "info") {
+  const status = $("#catalogueStatus");
+  status.textContent = message;
+  status.className = `catalogue-status notice-${tone}`;
+}
+
+function getItemSearchHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem(ITEM_SEARCH_HISTORY_KEY) || "[]");
+    return Array.isArray(history) ? history : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberItemSearch(query) {
+  const value = cleanDisplayText(query);
+  if (!value) return;
+  const history = getItemSearchHistory().filter((entry) => entry.toLowerCase() !== value.toLowerCase());
+  localStorage.setItem(ITEM_SEARCH_HISTORY_KEY, JSON.stringify([value, ...history].slice(0, 15)));
+}
+
+function renderItemSuggestions(extraSuggestions = []) {
+  const list = $("#itemSuggestions");
+  if (!list) return;
+  const catalogueSuggestions = state.catalogueResults.flatMap((product) => [
+    product.canonicalName,
+    ...(product.stores || []).map((store) => store.productName),
+  ]);
+  const suggestions = [
+    ...extraSuggestions,
+    ...getItemSearchHistory(),
+    ...state.items.flatMap((item) => [item.comparisonQuery, item.name]),
+    ...catalogueSuggestions,
+    ...defaultItemSuggestions,
+  ];
+  const seen = new Set();
+  list.innerHTML = "";
+  suggestions.forEach((suggestion) => {
+    const value = cleanDisplayText(suggestion);
+    const key = value.toLowerCase();
+    if (!value || seen.has(key) || seen.size >= 50) return;
+    seen.add(key);
+    const option = document.createElement("option");
+    option.value = value;
+    list.appendChild(option);
+  });
+}
+
+function scheduleItemSuggestions() {
+  if (state.itemSuggestionTimer) window.clearTimeout(state.itemSuggestionTimer);
+  state.itemSuggestionController?.abort();
+  const query = $("#catalogueSearchInput").value.trim();
+  renderItemSuggestions();
+  if (query.length < 3) return;
+  state.itemSuggestionTimer = window.setTimeout(async () => {
+    const controller = new AbortController();
+    state.itemSuggestionController = controller;
+    try {
+      const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=2${locationQuery()}`, {
+        signal: controller.signal,
+      });
+      if ($("#catalogueSearchInput").value.trim() !== query) return;
+      const suggestions = (payload.products || []).flatMap((product) => [
+        product.canonicalName,
+        ...(product.stores || []).map((store) => store.productName),
+      ]);
+      renderItemSuggestions(suggestions);
+    } catch (error) {
+      if (error?.name !== "AbortError") renderItemSuggestions();
+    } finally {
+      if (state.itemSuggestionController === controller) state.itemSuggestionController = null;
+    }
+  }, 450);
 }
 
 function locationQuery() {
@@ -300,6 +401,19 @@ function updateSummary() {
   setText("#bestBasket", best ? `${best.storeName} ${formatMoney(best.total)}` : "No scan yet");
 }
 
+function updateBasketActions() {
+  const shareButton = $("#shareBtn");
+  if (!shareButton) return;
+  const hasCurrentBasket = state.items.length > 0;
+  const hasSavedBasket = getSavedBaskets().some((basket) => Array.isArray(basket.items) && basket.items.length > 0);
+  shareButton.disabled = !hasCurrentBasket && !hasSavedBasket;
+  shareButton.title = shareButton.disabled
+    ? "Add or save a basket before sharing."
+    : hasCurrentBasket
+      ? "Share your current basket."
+      : "Load a saved basket to share it.";
+}
+
 function renderStores() {
   const wrap = $("#storeToggles");
   wrap.innerHTML = "";
@@ -334,7 +448,7 @@ function itemRow(item) {
     </td>
     <td class="basket-store-cell" data-label="Retailer"><span class="basket-store">${escapeHtml(storeName)}</span></td>
     <td class="basket-price-cell" data-label="Price"><strong class="basket-price">${formatMoney(item.selectedPrice)}</strong></td>
-    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" min="0.1" step="0.1" value="${item.quantity || 1}" /></td>
+    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" inputmode="numeric" min="1" step="1" value="${wholeQuantity(item.quantity)}" /></td>
     <td class="remove" data-label="Remove"><button type="button" data-remove="${item.id}">Remove</button></td>
   `;
   return tr;
@@ -353,8 +467,56 @@ function renderItems() {
   body.innerHTML = "";
   state.items.forEach((item) => body.appendChild(itemRow(item)));
   watchProductImages(body);
-  $("#emptyBasket").hidden = state.items.length > 0;
   $(".table-wrap").hidden = state.items.length === 0;
+  updateBasketActions();
+}
+
+function matchingBasketItem(store, product = null) {
+  return state.items.find((item) => (
+    (store.url && item.links?.[store.storeId] === store.url)
+    || (product?.id && item.selectedStoreId === store.storeId && item.selectedProductId === product.id)
+  ));
+}
+
+function openProductFocus(product, store, comparison, contextQuery = "") {
+  const dialog = $("#productFocusDialog");
+  const content = $("#productFocusContent");
+  const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
+  const existing = matchingBasketItem(store, product);
+  const wasPrice = store.regularPrice && store.regularPrice > store.price
+    ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>`
+    : "";
+  const unitPrice = comparison
+    ? `${formatMoney(comparison.unitPrice)} per ${escapeHtml(comparison.comparisonUnit)}`
+    : "";
+  const facts = [
+    store.brand && `<span><strong>Brand</strong>${escapeHtml(store.brand)}</span>`,
+    (store.size || product.targetSize) && `<span><strong>Pack size</strong>${escapeHtml(store.size || product.targetSize)}</span>`,
+    product.category && `<span><strong>Category</strong>${escapeHtml(product.category)}</span>`,
+    unitPrice && `<span><strong>Comparable price</strong>${unitPrice}</span>`,
+  ].filter(Boolean).join("");
+  content.innerHTML = `
+    <div class="product-focus-layout">
+      ${productImageMarkup(store.imageUrl, productName, "product-focus-image")}
+      <div class="product-focus-copy">
+        <p class="eyebrow">${escapeHtml(store.storeName)}</p>
+        <h2 id="productFocusTitle">${escapeHtml(productName)}</h2>
+        <p class="product-focus-description">A close match for <strong>${escapeHtml(contextQuery || state.catalogueQuery || product.canonicalName || productName)}</strong>. Review the pack details and listed retailer price before adding it.</p>
+        <div class="product-focus-facts">${facts}</div>
+        ${store.promoText ? `<p class="product-focus-promo">${escapeHtml(store.promoText)}</p>` : ""}
+        <div class="product-focus-actions">
+          <div class="product-focus-price">${wasPrice}<strong>${formatMoney(store.price)}</strong></div>
+          <button id="productFocusAddBtn" class="primary" type="button">${existing ? "Increase quantity" : "Add to basket"}</button>
+        </div>
+      </div>
+    </div>
+  `;
+  watchProductImages(content);
+  $("#productFocusAddBtn").addEventListener("click", async () => {
+    await addCatalogueProductToBasket(product, store, contextQuery || state.catalogueQuery);
+    $("#productFocusAddBtn").textContent = "Increase quantity";
+  });
+  if (!dialog.open) dialog.showModal();
 }
 
 function renderCatalogueResults() {
@@ -465,7 +627,10 @@ function renderCatalogueResults() {
         ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
         : "";
       const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-      const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View product</a>` : "";
+      const existing = matchingBasketItem(store, product);
+      article.tabIndex = 0;
+      article.setAttribute("role", "button");
+      article.setAttribute("aria-label", `Show details for ${productName} at ${store.storeName}`);
       article.innerHTML = `
         ${productImageMarkup(store.imageUrl, productName, "catalogue-image")}
         <div class="catalogue-product-copy">
@@ -473,12 +638,23 @@ function renderCatalogueResults() {
           <span>${escapeHtml(productName)}</span>
           <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
           ${special}
-          ${link}
+          <small class="catalogue-detail-hint">Select for product details</small>
         </div>
-        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add</button></div>
+        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">${existing ? "Increase qty" : "Add"}</button></div>
       `;
-      article.querySelector(".catalogue-add-btn").addEventListener("click", () => {
-        addCatalogueProductToBasket(product, store, state.catalogueQuery);
+      article.addEventListener("click", (event) => {
+        if (event.target.closest(".catalogue-add-btn")) return;
+        openProductFocus(product, store, comparison);
+      });
+      article.addEventListener("keydown", (event) => {
+        if (event.target.closest(".catalogue-add-btn")) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openProductFocus(product, store, comparison);
+      });
+      article.querySelector(".catalogue-add-btn").addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await addCatalogueProductToBasket(product, store, state.catalogueQuery);
       });
       columnMatches.appendChild(article);
     });
@@ -489,12 +665,21 @@ function renderCatalogueResults() {
 
 async function addCatalogueProductToBasket(product, store, preferredQuery = "") {
   const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-  const existing = state.items.find((item) => item.links?.[store.storeId] === store.url);
+  const existing = matchingBasketItem(store, product);
   if (existing) {
-    $("#catalogueStatus").textContent = `${productName} is already in the basket.`;
+    existing.quantity = wholeQuantity(existing.quantity) + 1;
+    state.latest = null;
+    renderItems();
+    renderResults();
+    await saveAll();
+    setCatalogueNotice(`${productName} was already in your basket. Quantity increased to ${existing.quantity}.`, "warning");
+    document.querySelector(`[data-id="${CSS.escape(existing.id)}"]`)?.classList.add("just-updated");
+    renderCatalogueResults();
+    if (state.specialsLoaded) renderSpecials();
+    scheduleBasketScan(150);
     return;
   }
-  state.items.push({
+  const item = {
     id: `${product.id}-${store.storeId}-${Date.now()}`,
     name: productName,
     query: productName,
@@ -510,28 +695,33 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
     selectedStoreName: store.storeName,
     selectedPrice: store.price,
     links: { [store.storeId]: store.url || "" },
-  });
+  };
+  state.items.push(item);
   state.latest = null;
   renderItems();
   renderResults();
   await saveAll();
-  $("#catalogueStatus").textContent = `${productName} added to the basket.`;
+  setCatalogueNotice(`${productName} added to your basket. Quantity: 1.`, "success");
+  document.querySelector(`[data-id="${CSS.escape(item.id)}"]`)?.classList.add("just-updated");
+  renderCatalogueResults();
+  if (state.specialsLoaded) renderSpecials();
   scheduleBasketScan(150);
 }
 
 async function searchCatalogue() {
   const query = $("#catalogueSearchInput").value.trim();
   if (!query) {
-    $("#catalogueStatus").textContent = "Type a product to compare.";
+    setCatalogueNotice("Type a product to compare.");
     return;
   }
   const button = $("#catalogueSearchBtn");
+  rememberItemSearch(query);
   state.catalogueQuery = query;
   readSettingsFromDom();
   const matchesPerRetailer = Math.min(12, Math.max(1, Number(state.settings.maxResultsPerStore || 6)));
   button.disabled = true;
   $("#catalogueLoading").hidden = false;
-  $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
+  setCatalogueNotice("Finding the closest retailer matches...");
   try {
     const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
@@ -540,11 +730,13 @@ async function searchCatalogue() {
       .flatMap((product) => product.stores || [])
       .filter((store) => store.price != null)
       .map((store) => store.storeId));
-    $("#catalogueStatus").textContent = state.catalogueResults.length
+    setCatalogueNotice(state.catalogueResults.length
       ? `${state.catalogueResults.length} close matches across ${matchedRetailers.size} retailers`
-      : "No priced catalogue matches yet.";
+      : "No priced catalogue matches yet.");
+    renderItemSuggestions();
     renderCatalogueResults();
   } catch (error) {
+    $("#catalogueStatus").className = "catalogue-status notice-warning";
     $("#catalogueStatus").innerHTML = `We could not load product matches. <button class="inline-retry" type="button">Try again</button>`;
     $("#catalogueStatus .inline-retry")?.addEventListener("click", searchCatalogue);
   } finally {
@@ -557,7 +749,9 @@ function readItemsFromDom() {
   const rows = new Map([...$("#itemsBody").querySelectorAll("tr")].map((row) => [row.dataset.id, row]));
   state.items = state.items.map((item) => {
     const quantityInput = rows.get(item.id)?.querySelector('[data-field="quantity"]');
-    return { ...item, quantity: Number(quantityInput?.value || item.quantity || 1) };
+    const quantity = wholeQuantity(quantityInput?.value || item.quantity || 1);
+    if (quantityInput) quantityInput.value = String(quantity);
+    return { ...item, quantity };
   });
 }
 
@@ -582,26 +776,50 @@ function renderBasketTotals(scan) {
   const wrap = $("#basketTotals");
   wrap.innerHTML = "";
   if (!scan) return;
-  Object.values(scan.basketTotals).forEach((total) => {
-    const chip = document.createElement("div");
-    chip.className = `total-chip ${scan.bestBasketStoreId === total.storeId ? "best" : ""}`;
+  const totals = Object.values(scan.basketTotals || {}).sort((left, right) => {
+    const leftComplete = left.missing === 0;
+    const rightComplete = right.missing === 0;
+    if (leftComplete !== rightComplete) return leftComplete ? -1 : 1;
+    if (!leftComplete && left.missing !== right.missing) return left.missing - right.missing;
+    return left.total - right.total;
+  });
+  if (!totals.some((total) => total.storeId === state.activeBasketRetailer)) {
+    state.activeBasketRetailer = totals[0]?.storeId || "";
+  }
+  totals.forEach((total) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = [
+      "total-chip",
+      scan.bestBasketStoreId === total.storeId ? "best" : "",
+      total.missing ? "incomplete" : "",
+      state.activeBasketRetailer === total.storeId ? "is-active" : "",
+    ].filter(Boolean).join(" ");
+    chip.setAttribute("aria-pressed", String(state.activeBasketRetailer === total.storeId));
     const label = total.missing
-      ? `${total.storeName} known total, ${total.missing} missing`
-      : `${total.storeName} full basket`;
+      ? `${total.missing} ${total.missing === 1 ? "item" : "items"} missing`
+      : "Full basket";
     chip.innerHTML = `
-      <span>${label}</span>
-      <strong>${total.total ? formatMoney(total.total) : "-"}</strong>
+      <span class="total-chip-store">${escapeHtml(total.storeName)}</span>
+      <strong>${total.total || total.missing === 0 ? formatMoney(total.total) : "No priced items"}</strong>
+      <small>${label}</small>
     `;
+    chip.addEventListener("click", () => {
+      state.activeBasketRetailer = total.storeId;
+      renderResults();
+    });
     wrap.appendChild(chip);
   });
 }
 
 function renderResults() {
   const wrap = $("#results");
+  const emptyResults = $("#emptyResults");
   wrap.innerHTML = "";
+  emptyResults.innerHTML = "<strong>No basket totals yet.</strong><span>Add a product and RandBasket will compare available totals automatically.</span>";
   renderBasketTotals(state.latest);
   if (!state.latest) {
-    $("#emptyResults").hidden = state.items.length > 0;
+    emptyResults.hidden = state.items.length > 0;
     if (state.items.length) {
       wrap.innerHTML = state.items.map((item) => `
         <article class="result-card">
@@ -621,70 +839,70 @@ function renderResults() {
     }
     return;
   }
-  $("#emptyResults").hidden = true;
-  state.latest.scans.forEach((scan) => {
-    const card = document.createElement("article");
-    card.className = "result-card";
+  emptyResults.hidden = true;
+  const total = state.latest.basketTotals?.[state.activeBasketRetailer];
+  if (!total) {
+    emptyResults.hidden = false;
+    emptyResults.innerHTML = "<strong>No retailers selected.</strong><span>Enable at least one retailer in Value Settings to compare this basket.</span>";
+    return;
+  }
+  const basketRows = state.latest.scans.map((scan) => {
     const basketItem = state.items.find((item) => item.id === scan.itemId);
-    const selectedResult = scan.results.find((result) => result.storeId === basketItem?.selectedStoreId && result.imageUrl)
-      || scan.results.find((result) => result.imageUrl);
-    const basketImageUrl = basketItem?.imageUrl || selectedResult?.imageUrl || "";
-    const rows = scan.results
-      .map((result) => {
-        const isBest = scan.bestStoreId === result.storeId;
-        const adjustment = result.valueAdjustments?.length
-          ? ` after ${result.valueAdjustments.map((a) => a.label).join(", ")}`
-          : "";
-        const hasPrice = result.effectivePrice != null;
-        const measure = result.productMeasure?.label ? ` (${result.productMeasure.label})` : "";
-        const normalized = hasPrice && result.normalizedPrice != null && result.normalizedPrice !== result.effectivePrice
-          ? ` -> ${formatMoney(result.normalizedPrice)} target`
-          : "";
-        const dealLine = result.promoText
-          ? `<small class="deal-line ${result.promoApplied ? "applied" : "note"}">${escapeHtml(result.promoText)}</small>`
-          : "";
-        const wasPrice = hasPrice && result.regularPrice && result.regularPrice > result.price
-          ? `<span class="was-price">${formatMoney(result.regularPrice)}</span>`
-          : "";
-        const product = hasPrice
-          ? `${result.productName || "Matched product"}${measure}${adjustment}${normalized}`
-          : "Price not readable - direct supplier link:";
-        const link = hasPrice ? result.productUrl || result.queryUrl : result.queryUrl || result.productUrl;
-        const linkHtml = link
-          ? `<a class="direct-url" href="${escapeAttr(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a>`
-          : `<span class="direct-url muted">No direct link available</span>`;
-        return `
-          <div class="price-row ${isBest ? "best" : ""}">
-            <div class="supplier-result-layout">
-              ${productImageMarkup(result.imageUrl, result.productName || `${result.storeName} product`, "result-match-image")}
-              <div class="supplier-result">
-                <strong>${result.storeName}</strong>
-                <small>${escapeHtml(product)}</small>
-                ${dealLine}
-                ${linkHtml}
-              </div>
-            </div>
-            <div class="price">${wasPrice}${formatMoney(result.effectivePrice)}</div>
-          </div>
-        `;
-      })
-      .join("");
-    card.innerHTML = `
-      <div class="result-head">
-        <div class="result-product-heading">
-          ${productImageMarkup(basketImageUrl, scan.name, "result-product-image")}
+    const result = scan.results.find((entry) => entry.storeId === state.activeBasketRetailer);
+    const hasPrice = result?.lineTotal != null;
+    const target = [scan.name, scan.targetMeasure?.label].filter(Boolean).join(" - ");
+    const matchedName = hasPrice ? cleanDisplayText(result.productName) || "Matched product" : "No close match found";
+    const pack = result?.productMeasure?.label || "";
+    const normalized = hasPrice && result.normalizedPrice != null && result.normalizedPrice !== result.effectivePrice
+      ? `${formatMoney(result.normalizedPrice)} adjusted to target size`
+      : "";
+    const details = [pack, normalized].filter(Boolean).join(" - ");
+    const promo = result?.promoText
+      ? `<small class="retailer-basket-promo">${escapeHtml(result.promoText)}</small>`
+      : "";
+    const wasPrice = hasPrice && result.regularPrice && result.regularPrice > result.price
+      ? `<span class="was-price">${formatMoney(result.regularPrice)}</span>`
+      : "";
+    return `
+      <div class="retailer-basket-row${hasPrice ? "" : " is-missing"}">
+        <div class="retailer-basket-product" data-label="Product">
+          ${productImageMarkup(result?.imageUrl || basketItem?.imageUrl, matchedName, "retailer-basket-image")}
           <div>
-            <h3>${escapeHtml(scan.name)}</h3>
-            <div class="status">${escapeHtml(scan.query)}${scan.targetMeasure?.label ? ` - target ${escapeHtml(scan.targetMeasure.label)}` : ""} - qty ${scan.quantity}</div>
+            <strong>${escapeHtml(matchedName)}</strong>
+            <span>For ${escapeHtml(target)}</span>
+            ${details ? `<small>${escapeHtml(details)}</small>` : ""}
+            ${promo}
           </div>
         </div>
-        <span class="badge">${scan.bestStoreName || "No match"}</span>
+        <div class="retailer-basket-number" data-label="Unit price">${wasPrice}<strong>${formatMoney(result?.effectivePrice)}</strong></div>
+        <div class="retailer-basket-number" data-label="Qty"><strong>${wholeQuantity(scan.quantity)}</strong></div>
+        <div class="retailer-basket-number line-total" data-label="Line total"><strong>${formatMoney(result?.lineTotal)}</strong></div>
       </div>
-      ${rows}
     `;
-    wrap.appendChild(card);
-    watchProductImages(card);
-  });
+  }).join("");
+  const isBest = state.latest.bestBasketStoreId === total.storeId && total.missing === 0;
+  wrap.innerHTML = `
+    <section class="retailer-basket-view${isBest ? " best-basket" : ""}${total.missing ? " incomplete-basket" : ""}">
+      <header class="retailer-basket-header">
+        <div>
+          <span>${isBest ? "Cheapest complete basket" : total.missing ? "Incomplete comparison" : "Complete basket"}</span>
+          <h3>${escapeHtml(total.storeName)}</h3>
+          <p>${total.missing ? `${total.missing} ${total.missing === 1 ? "item is" : "items are"} still missing from this retailer.` : "Every basket item has a close catalogue match."}</p>
+        </div>
+        <div class="retailer-basket-total">
+          <span>${total.missing ? "Known subtotal" : "Basket total"}</span>
+          <strong>${formatMoney(total.total)}</strong>
+        </div>
+      </header>
+      <div class="retailer-basket-table">
+        <div class="retailer-basket-table-head" aria-hidden="true">
+          <span>Product</span><span>Unit price</span><span>Qty</span><span>Line total</span>
+        </div>
+        ${basketRows}
+      </div>
+    </section>
+  `;
+  watchProductImages(wrap);
 }
 
 function escapeHtml(value) {
@@ -785,7 +1003,7 @@ async function runScan({ automatic = false } = {}) {
   readSettingsFromDom();
   if (!state.items.length) {
     setText("#scanStatus", "Add an item to begin");
-    if (!automatic) $("#emptyBasket").scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!automatic) $("#weeklyStaples")?.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
   if (state.autoScanTimer) {
@@ -852,9 +1070,16 @@ function renderSpecials() {
   }
   state.specials.forEach((special) => {
     const store = special.store;
+    const product = {
+      id: special.productId,
+      canonicalName: special.canonicalName,
+      category: special.category,
+      targetSize: special.targetSize,
+    };
     const card = document.createElement("article");
     card.className = "special-card";
     const productName = cleanDisplayText(store.productName || special.canonicalName) || "Special";
+    const existing = matchingBasketItem(store, product);
     const image = store.imageUrl
       ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />`
       : `<div class="catalogue-image-placeholder">Catalogue offer</div>`;
@@ -870,15 +1095,26 @@ function renderSpecials() {
         ${store.regularPrice ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
         <strong>${formatMoney(store.price)}</strong>
         ${special.saving ? `<small>Save ${formatMoney(special.saving)}</small>` : ""}
-        <button type="button">Add to basket</button>
+        <button type="button">${existing ? "Increase qty" : "Add to basket"}</button>
       </div>
     `;
-    card.querySelector("button").addEventListener("click", () => addCatalogueProductToBasket({
-      id: special.productId,
-      canonicalName: special.canonicalName,
-      category: special.category,
-      targetSize: special.targetSize,
-    }, store, special.canonicalName));
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Show details for ${productName} at ${store.storeName}`);
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      openProductFocus(product, store, getUnitComparison(product, store), special.canonicalName);
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.target.closest("button")) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openProductFocus(product, store, getUnitComparison(product, store), special.canonicalName);
+    });
+    card.querySelector("button").addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await addCatalogueProductToBasket(product, store, special.canonicalName);
+    });
     wrap.appendChild(card);
   });
 }
@@ -920,8 +1156,9 @@ function renderSavedBaskets() {
   });
 }
 
-function openBasketDialog() {
+function openBasketDialog(message = "") {
   renderSavedBaskets();
+  setText("#basketDialogStatus", message);
   if (!$("#basketDialog").open) $("#basketDialog").showModal();
 }
 
@@ -937,14 +1174,16 @@ function saveNamedBasket() {
   localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify([entry, ...baskets.filter((basket) => basket.id !== entry.id)].slice(0, 20)));
   setText("#basketDialogStatus", `${name} saved on this device.`);
   renderSavedBaskets();
+  updateBasketActions();
 }
 
 function loadSavedBasket(id) {
   const basket = getSavedBaskets().find((entry) => entry.id === id);
   if (!basket) return;
-  state.items = basket.items || [];
+  state.items = (basket.items || []).map((item) => ({ ...item, quantity: wholeQuantity(item.quantity) }));
   state.settings = basket.settings || state.settings;
   state.latest = basket.latest || null;
+  state.activeBasketRetailer = "";
   renderStores(); renderLocation(); renderItems(); renderResults(); updateSummary(); saveDeviceState();
   $("#basketDialog").close();
   scheduleBasketScan(150);
@@ -953,21 +1192,74 @@ function loadSavedBasket(id) {
 function deleteSavedBasket(id) {
   localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify(getSavedBaskets().filter((entry) => entry.id !== id)));
   renderSavedBaskets();
+  updateBasketActions();
 }
 
-function shareBasket() {
+function encodeSharedBasket(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function decodeSharedBasket(value) {
+  const base64 = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function fallbackCopyShareLink(url) {
+  const input = document.createElement("textarea");
+  input.value = url;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (copied) {
+    setText("#scanStatus", "Share link copied");
+    return;
+  }
+  window.prompt("Copy this basket link:", url);
+}
+
+async function shareBasket() {
   readItemsFromDom();
-  if (!state.items.length) { setText("#scanStatus", "Add at least one product before sharing."); return; }
+  if (!state.items.length) {
+    if (getSavedBaskets().some((basket) => basket.items?.length)) {
+      openBasketDialog("Load a saved basket first, then select Share basket again.");
+    } else {
+      setText("#scanStatus", "Add or save a basket before sharing.");
+    }
+    return;
+  }
   const cleanSettings = { ...state.settings };
   delete cleanSettings.location;
-  const payload = btoa(unescape(encodeURIComponent(JSON.stringify({ items: state.items, settings: cleanSettings }))));
-  const url = `${location.origin}${location.pathname}?basket=${encodeURIComponent(payload)}`;
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(url)
-      .then(() => setText("#scanStatus", "Share link copied"))
-      .catch(() => window.prompt("Copy this basket link:", url));
-  } else {
-    window.prompt("Copy this basket link:", url);
+  const payload = encodeSharedBasket({ items: state.items, settings: cleanSettings });
+  const url = `${location.origin}${location.pathname}?basket=${payload}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: "My RandBasket grocery basket",
+        text: "Compare this grocery basket on RandBasket.",
+        url,
+      });
+      setText("#scanStatus", "Basket shared");
+      return;
+    }
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+      setText("#scanStatus", "Share link copied");
+      return;
+    }
+    fallbackCopyShareLink(url);
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    fallbackCopyShareLink(url);
   }
 }
 
@@ -975,15 +1267,21 @@ function importSharedBasket() {
   const payload = new URLSearchParams(location.search).get("basket");
   if (!payload) return;
   try {
-    const shared = JSON.parse(decodeURIComponent(escape(atob(payload))));
+    let shared;
+    try {
+      shared = decodeSharedBasket(payload);
+    } catch {
+      shared = JSON.parse(decodeURIComponent(escape(atob(payload))));
+    }
     if (!Array.isArray(shared.items)) return;
     if (state.items.length && !window.confirm("Replace your current basket with the shared basket?")) {
       history.replaceState({}, "", location.pathname + location.hash);
       return;
     }
-    state.items = shared.items;
+    state.items = shared.items.map((item) => ({ ...item, quantity: wholeQuantity(item.quantity) }));
     state.settings = { ...state.settings, ...(shared.settings || {}) };
     state.latest = null;
+    state.activeBasketRetailer = "";
     saveDeviceState();
     history.replaceState({}, "", location.pathname + location.hash);
     setText("#scanStatus", "Shared basket loaded");
@@ -1078,9 +1376,16 @@ function submitFeedback(event) {
 
 function wireEvents() {
   $("#addItemBtn").addEventListener("click", addItem);
-  $("#saveBtn").addEventListener("click", openBasketDialog);
+  $("#saveBtn").addEventListener("click", () => openBasketDialog());
   $("#shareBtn").addEventListener("click", shareBasket);
   $("#basketDialogClose").addEventListener("click", () => $("#basketDialog").close());
+  $("#basketDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) $("#basketDialog").close();
+  });
+  $("#productFocusCloseBtn").addEventListener("click", () => $("#productFocusDialog").close());
+  $("#productFocusDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) $("#productFocusDialog").close();
+  });
   $("#basketSaveNamedBtn").addEventListener("click", saveNamedBasket);
   $("#savedBasketList").addEventListener("click", (event) => {
     if (event.target.dataset.load) loadSavedBasket(event.target.dataset.load);
@@ -1115,6 +1420,8 @@ function wireEvents() {
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchCatalogue();
   });
+  $("#catalogueSearchInput").addEventListener("input", scheduleItemSuggestions);
+  $("#catalogueSearchInput").addEventListener("focus", () => renderItemSuggestions());
   $("#specialsToggle").addEventListener("click", () => {
     setSpecialsOpen($("#specialsToggle").getAttribute("aria-expanded") !== "true");
   });
@@ -1129,7 +1436,9 @@ function wireEvents() {
   });
   $("#storeToggles").addEventListener("change", () => scheduleBasketScan());
   $("#itemsBody").addEventListener("input", (event) => {
-    if (event.target.matches('[data-field="quantity"]')) scheduleBasketScan(650);
+    if (!event.target.matches('[data-field="quantity"]')) return;
+    if (event.target.value !== "") event.target.value = String(wholeQuantity(event.target.value));
+    scheduleBasketScan(650);
   });
   $("#itemsBody").addEventListener("click", (event) => {
     const removeId = event.target.dataset.remove;
@@ -1149,7 +1458,9 @@ async function init() {
   } catch {
     saved = {};
   }
-  state.items = Array.isArray(saved.items) ? saved.items : [];
+  state.items = Array.isArray(saved.items)
+    ? saved.items.map((item) => ({ ...item, quantity: wholeQuantity(item.quantity) }))
+    : [];
   state.settings = saved.settings || {
     maxResultsPerStore: 6,
     stores: Object.fromEntries(defaultStores.map((store) => [store.id, true])),
@@ -1161,6 +1472,7 @@ async function init() {
   renderStores();
   renderLocation();
   renderItems();
+  renderItemSuggestions();
   renderResults();
   updateSummary();
   wireEvents();
@@ -1186,6 +1498,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=26").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=32").catch(() => {});
   });
 }

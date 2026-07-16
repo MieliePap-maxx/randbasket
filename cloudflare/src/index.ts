@@ -1042,7 +1042,7 @@ async function scanBasket(request: Request, env: Env) {
       String(item.comparisonQuery || item.query || item.name || "").trim(),
       item.selectedBrand,
     );
-    const quantity = Math.max(0.01, Number(item.quantity || 1));
+    const quantity = Math.max(1, Math.round(Number(item.quantity || 1)));
     const closestMatches = query
       ? await findClosestBasketMatches(env, item, enabledRetailers, profiles, location)
       : new Map<string, {
