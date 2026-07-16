@@ -6,23 +6,18 @@ const state = {
   pnpProgressTimer: null,
   catalogueResults: [],
   catalogueRetailerMatches: [],
-  catalogueQuery: "",
-  activeCatalogueRetailer: "pick-n-pay",
-  activeBasketRetailer: "",
+  cataloguePage: 1,
+  catalogueHasMore: false,
   specials: [],
   specialsLoaded: false,
   autoScanTimer: null,
   scanInFlight: false,
   scanQueued: false,
-  itemSuggestionTimer: null,
-  itemSuggestionController: null,
-  catalogueNoticeTimer: null,
 };
 
 const API_ORIGIN = "https://api.randbasket.co.za";
 const STORAGE_KEY = "randbasket-web-state-v1";
 const SAVED_BASKETS_KEY = "randbasket-saved-baskets-v1";
-const ITEM_SEARCH_HISTORY_KEY = "randbasket-item-search-history-v1";
 const FEEDBACK_EMAIL = "randbasketzar@gmail.com";
 const TURNSTILE_SITE_KEY = "0x4AAAAAAD3NsfAYMYxlQRFS";
 let feedbackTurnstileWidgetId = null;
@@ -33,22 +28,6 @@ const defaultStores = [
   { id: "woolworths", name: "Woolworths" },
   { id: "spar", name: "SPAR" },
   { id: "makro", name: "Makro" },
-];
-const defaultItemSuggestions = [
-  "Full cream milk 2L",
-  "White bread 700g",
-  "Eggs 18 pack",
-  "Beef mince 1kg",
-  "Chicken portions 1kg",
-  "Cake flour 2.5kg",
-  "Plain yoghurt 1kg",
-  "Streaky bacon 200g",
-  "White sugar 2.5kg",
-  "Rice 2kg",
-  "Sunflower oil 2L",
-  "Instant coffee 200g",
-  "Black tea 100 bags",
-  "Toothpaste 100ml",
 ];
 
 const moneyFmt = new Intl.NumberFormat("en-ZA", {
@@ -82,119 +61,6 @@ async function api(path, options = {}) {
 
 function formatMoney(value) {
   return value == null ? "-" : moneyFmt.format(value);
-}
-
-function wholeQuantity(value) {
-  const quantity = Number(value);
-  return Number.isFinite(quantity) ? Math.max(1, Math.round(quantity)) : 1;
-}
-
-function setCatalogueNotice(message, tone = "info", autoClearMs = 0) {
-  const status = $("#catalogueStatus");
-  if (state.catalogueNoticeTimer) {
-    window.clearTimeout(state.catalogueNoticeTimer);
-    state.catalogueNoticeTimer = null;
-  }
-  status.textContent = message;
-  status.className = `catalogue-status notice-${tone}`;
-  if (autoClearMs > 0) {
-    state.catalogueNoticeTimer = window.setTimeout(() => {
-      status.textContent = "";
-      status.className = "catalogue-status";
-      state.catalogueNoticeTimer = null;
-    }, autoClearMs);
-  }
-}
-
-function clearCatalogueNotice() {
-  setCatalogueNotice("");
-}
-
-function setCatalogueCorrectionNotice(originalQuery, correctedQuery) {
-  const status = $("#catalogueStatus");
-  if (state.catalogueNoticeTimer) {
-    window.clearTimeout(state.catalogueNoticeTimer);
-    state.catalogueNoticeTimer = null;
-  }
-  status.className = "catalogue-status catalogue-correction";
-  status.innerHTML = `
-    <span>Showing results for <strong>&ldquo;${escapeHtml(correctedQuery)}&rdquo;</strong></span>
-    <button type="button">Search instead for &ldquo;${escapeHtml(originalQuery)}&rdquo;</button>
-  `;
-  status.querySelector("button")?.addEventListener("click", () => {
-    $("#catalogueSearchInput").value = originalQuery;
-    searchCatalogue({ queryOverride: originalQuery, allowCorrection: false });
-  });
-}
-
-function getItemSearchHistory() {
-  try {
-    const history = JSON.parse(localStorage.getItem(ITEM_SEARCH_HISTORY_KEY) || "[]");
-    return Array.isArray(history) ? history : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberItemSearch(query) {
-  const value = cleanDisplayText(query);
-  if (!value) return;
-  const history = getItemSearchHistory().filter((entry) => entry.toLowerCase() !== value.toLowerCase());
-  localStorage.setItem(ITEM_SEARCH_HISTORY_KEY, JSON.stringify([value, ...history].slice(0, 15)));
-}
-
-function renderItemSuggestions(extraSuggestions = []) {
-  const list = $("#itemSuggestions");
-  if (!list) return;
-  const catalogueSuggestions = state.catalogueResults.flatMap((product) => [
-    product.canonicalName,
-    ...(product.stores || []).map((store) => store.productName),
-  ]);
-  const suggestions = [
-    ...extraSuggestions,
-    ...getItemSearchHistory(),
-    ...state.items.flatMap((item) => [item.comparisonQuery, item.name]),
-    ...catalogueSuggestions,
-    ...defaultItemSuggestions,
-  ];
-  const seen = new Set();
-  list.innerHTML = "";
-  suggestions.forEach((suggestion) => {
-    const value = cleanDisplayText(suggestion);
-    const key = value.toLowerCase();
-    if (!value || seen.has(key) || seen.size >= 50) return;
-    seen.add(key);
-    const option = document.createElement("option");
-    option.value = value;
-    list.appendChild(option);
-  });
-}
-
-function scheduleItemSuggestions() {
-  if (state.itemSuggestionTimer) window.clearTimeout(state.itemSuggestionTimer);
-  state.itemSuggestionController?.abort();
-  const query = $("#catalogueSearchInput").value.trim();
-  renderItemSuggestions();
-  if (query.length < 3) return;
-  state.itemSuggestionTimer = window.setTimeout(async () => {
-    const controller = new AbortController();
-    state.itemSuggestionController = controller;
-    try {
-      const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=2${locationQuery()}`, {
-        signal: controller.signal,
-      });
-      if ($("#catalogueSearchInput").value.trim() !== query) return;
-      const suggestions = (payload.products || []).flatMap((product) => [
-        product.canonicalName,
-        ...(product.stores || []).map((store) => store.productName),
-      ]);
-      renderItemSuggestions(suggestions);
-    } catch (error) {
-      if (error?.name !== "AbortError") renderItemSuggestions();
-    } finally {
-      if (state.itemSuggestionController === controller) state.itemSuggestionController = null;
-    }
-  }, 450);
 }
 
 function locationQuery() {
@@ -297,16 +163,6 @@ function cleanDisplayText(value) {
 }
 
 const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
-const retailerAliases = [
-  "pick n pay",
-  "pick and pay",
-  "pnp",
-  "checkers",
-  "woolworths",
-  "woolies",
-  "spar",
-  "makro",
-];
 
 const measurementUnits = {
   mg: { dimension: "mass", baseMultiplier: 0.001, comparisonAmount: 1000, comparisonUnit: "kg" },
@@ -374,55 +230,6 @@ function getUnitComparison(product, store) {
   };
 }
 
-function stripComparisonBranding(value, brand = "") {
-  let text = cleanDisplayText(value).toLowerCase();
-  [...retailerAliases, brand]
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length)
-    .forEach((term) => {
-      const escaped = String(term).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      text = text.replace(new RegExp(`\\b${escaped}\\b`, "gi"), " ");
-    });
-  return text
-    .replace(/[^a-z0-9.,]+/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function buildComparisonQuery(product, store, preferredQuery = "") {
-  const searchTerms = Array.isArray(product.searchTerms) ? [...product.searchTerms].filter(Boolean) : [];
-  const source = preferredQuery
-    || searchTerms.sort((left, right) => String(right).length - String(left).length)[0]
-    || product.canonicalName
-    || store.productName
-    || "product";
-  let query = stripComparisonBranding(source, store.brand);
-  const targetSize = cleanDisplayText(store.size || product.targetSize || "");
-  if (targetSize && !parseMeasurement(query)) query = `${query} ${targetSize}`.trim();
-  return query;
-}
-
-function productImageMarkup(imageUrl, productName, className) {
-  const initial = cleanDisplayText(productName).charAt(0).toUpperCase() || "R";
-  const image = imageUrl
-    ? `<img data-product-image src="${escapeAttr(imageUrl)}" alt="${escapeAttr(productName)}" loading="lazy" />`
-    : "";
-  return `
-    <span class="${className}">
-      <span class="product-image-fallback" aria-hidden="true">${escapeHtml(initial)}</span>
-      ${image}
-    </span>
-  `;
-}
-
-function watchProductImages(root = document) {
-  root.querySelectorAll("img[data-product-image]").forEach((image) => {
-    image.addEventListener("error", () => {
-      image.hidden = true;
-    }, { once: true });
-  });
-}
-
 function updateSummary() {
   setText("#itemCount", state.items.length);
   const maxResultsInput = $("#maxResultsInput");
@@ -432,19 +239,6 @@ function updateSummary() {
   const bestId = latest?.bestBasketStoreId;
   const best = bestId ? latest.basketTotals[bestId] : null;
   setText("#bestBasket", best ? `${best.storeName} ${formatMoney(best.total)}` : "No scan yet");
-}
-
-function updateBasketActions() {
-  const shareButton = $("#shareBtn");
-  if (!shareButton) return;
-  const hasCurrentBasket = state.items.length > 0;
-  const hasSavedBasket = getSavedBaskets().some((basket) => Array.isArray(basket.items) && basket.items.length > 0);
-  shareButton.disabled = !hasCurrentBasket && !hasSavedBasket;
-  shareButton.title = shareButton.disabled
-    ? "Add or save a basket before sharing."
-    : hasCurrentBasket
-      ? "Share your current basket."
-      : "Load a saved basket to share it.";
 }
 
 function renderStores() {
@@ -473,15 +267,10 @@ function itemRow(item) {
     || "Choose from search";
   const details = [item.targetSize, item.category].filter(Boolean).join(" - ");
   tr.innerHTML = `
-    <td class="item-name" data-label="Product">
-      <div class="basket-product-layout">
-        ${productImageMarkup(item.imageUrl, item.name, "basket-product-image")}
-        <div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div>
-      </div>
-    </td>
+    <td class="item-name" data-label="Product"><div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div></td>
     <td class="basket-store-cell" data-label="Retailer"><span class="basket-store">${escapeHtml(storeName)}</span></td>
     <td class="basket-price-cell" data-label="Price"><strong class="basket-price">${formatMoney(item.selectedPrice)}</strong></td>
-    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" inputmode="numeric" min="1" step="1" value="${wholeQuantity(item.quantity)}" /></td>
+    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" min="0.1" step="0.1" value="${item.quantity || 1}" /></td>
     <td class="remove" data-label="Remove"><button type="button" data-remove="${item.id}">Remove</button></td>
   `;
   return tr;
@@ -499,132 +288,18 @@ function renderItems() {
   const body = $("#itemsBody");
   body.innerHTML = "";
   state.items.forEach((item) => body.appendChild(itemRow(item)));
-  watchProductImages(body);
+  $("#emptyBasket").hidden = state.items.length > 0;
   $(".table-wrap").hidden = state.items.length === 0;
-  updateBasketActions();
-}
-
-function matchingBasketItem(store, product = null) {
-  return state.items.find((item) => (
-    (store.url && item.links?.[store.storeId] === store.url)
-    || (product?.id && item.selectedStoreId === store.storeId && item.selectedProductId === product.id)
-  ));
-}
-
-function visiblePromoText(store) {
-  const hasVerifiedReduction = store.regularPrice && store.price != null && store.regularPrice > store.price;
-  const promoText = cleanDisplayText(store.promoText);
-  if (!promoText || (!store.promoApplied && !hasVerifiedReduction)) return "";
-  const advertisedNowPrice = promoText.match(/\bnow\s+r?\s*(\d+(?:[.,]\d{1,2})?)/i);
-  if (advertisedNowPrice && store.price != null) {
-    const advertisedPrice = Number(advertisedNowPrice[1].replace(",", "."));
-    if (Number.isFinite(advertisedPrice) && Math.abs(advertisedPrice - store.price) > 0.02) return "";
-  }
-  return promoText;
-}
-
-function quantityControlMarkup(existing, label, compact = false, addLabel = "Add") {
-  if (!existing) {
-    return `<button type="button" class="catalogue-add-btn catalogue-item-control">${escapeHtml(addLabel)}</button>`;
-  }
-  return `
-    <div class="quantity-stepper catalogue-item-control${compact ? " is-compact" : ""}" aria-label="${escapeAttr(`Quantity for ${label}`)}">
-      <button type="button" data-quantity-action="decrease" aria-label="${escapeAttr(`Decrease ${label} quantity`)}">&minus;</button>
-      <strong aria-label="Current quantity">${wholeQuantity(existing.quantity)}</strong>
-      <button type="button" data-quantity-action="increase" aria-label="${escapeAttr(`Increase ${label} quantity`)}">&plus;</button>
-    </div>
-  `;
-}
-
-async function adjustCatalogueProductQuantity(product, store, delta, preferredQuery = "") {
-  const existing = matchingBasketItem(store, product);
-  if (!existing && delta > 0) {
-    await addCatalogueProductToBasket(product, store, preferredQuery);
-    return;
-  }
-  if (!existing) return;
-  const nextQuantity = wholeQuantity(existing.quantity) + delta;
-  if (nextQuantity <= 0) {
-    state.items = state.items.filter((item) => item.id !== existing.id);
-  } else {
-    existing.quantity = nextQuantity;
-  }
-  state.latest = null;
-  clearCatalogueNotice();
-  renderItems();
-  renderResults();
-  await saveAll();
-  renderCatalogueResults();
-  if (state.specialsLoaded) renderSpecials();
-  scheduleBasketScan(150);
-}
-
-function wireQuantityControl(root, product, store, preferredQuery = "", onChange = null) {
-  const addButton = root.querySelector(".catalogue-add-btn");
-  if (addButton) {
-    addButton.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await addCatalogueProductToBasket(product, store, preferredQuery);
-      onChange?.();
-    });
-  }
-  root.querySelectorAll("[data-quantity-action]").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      const delta = button.dataset.quantityAction === "increase" ? 1 : -1;
-      await adjustCatalogueProductQuantity(product, store, delta, preferredQuery);
-      onChange?.();
-    });
-  });
-}
-
-function openProductFocus(product, store, comparison, contextQuery = "") {
-  const dialog = $("#productFocusDialog");
-  const content = $("#productFocusContent");
-  const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-  const existing = matchingBasketItem(store, product);
-  const wasPrice = store.regularPrice && store.regularPrice > store.price
-    ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>`
-    : "";
-  const unitPrice = comparison
-    ? `${formatMoney(comparison.unitPrice)} per ${escapeHtml(comparison.comparisonUnit)}`
-    : "";
-  const promoText = visiblePromoText(store);
-  const facts = [
-    store.brand && `<span><strong>Brand</strong>${escapeHtml(store.brand)}</span>`,
-    (store.size || product.targetSize) && `<span><strong>Pack size</strong>${escapeHtml(store.size || product.targetSize)}</span>`,
-    product.category && `<span><strong>Category</strong>${escapeHtml(product.category)}</span>`,
-    unitPrice && `<span><strong>Comparable price</strong>${unitPrice}</span>`,
-  ].filter(Boolean).join("");
-  content.innerHTML = `
-    <div class="product-focus-layout">
-      ${productImageMarkup(store.imageUrl, productName, "product-focus-image")}
-      <div class="product-focus-copy">
-        <p class="eyebrow">${escapeHtml(store.storeName)}</p>
-        <h2 id="productFocusTitle">${escapeHtml(productName)}</h2>
-        <p class="product-focus-description">Matched to your search for <strong>${escapeHtml(contextQuery || state.catalogueQuery || product.canonicalName || productName)}</strong>. Check the pack size and current price before adding it to your basket.</p>
-        <div class="product-focus-facts">${facts}</div>
-        ${promoText ? `<p class="product-focus-promo">${escapeHtml(promoText)}</p>` : ""}
-        <div class="product-focus-actions">
-          <div class="product-focus-price">${wasPrice}<strong>${formatMoney(store.price)}</strong></div>
-          <div class="product-focus-control">${quantityControlMarkup(existing, productName, false, "Add to basket")}</div>
-        </div>
-      </div>
-    </div>
-  `;
-  watchProductImages(content);
-  wireQuantityControl(content, product, store, contextQuery || state.catalogueQuery, () => {
-    openProductFocus(product, store, comparison, contextQuery);
-  });
-  if (!dialog.open) dialog.showModal();
 }
 
 function renderCatalogueResults() {
   const wrap = $("#catalogueResults");
-  const tabs = $("#catalogueRetailerTabs");
+  const pagination = $("#cataloguePagination");
   wrap.innerHTML = "";
-  tabs.innerHTML = "";
-  tabs.hidden = state.catalogueResults.length === 0;
+  pagination.hidden = state.catalogueResults.length === 0;
+  $("#cataloguePreviousBtn").disabled = state.cataloguePage <= 1;
+  $("#catalogueMoreBtn").disabled = !state.catalogueHasMore;
+  $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage}`;
   if (!state.catalogueResults.length) return;
 
   const retailerMatches = state.catalogueRetailerMatches.length
@@ -644,7 +319,7 @@ function renderCatalogueResults() {
     .sort((left, right) => comparisonStoreOrder.indexOf(left.store.storeId) - comparisonStoreOrder.indexOf(right.store.storeId));
 
   if (!matches.length) {
-    wrap.innerHTML = `<div class="empty">No close priced catalogue matches yet.</div>`;
+    wrap.innerHTML = `<div class="empty">No close priced catalogue matches on this page.</div>`;
     return;
   }
 
@@ -661,188 +336,103 @@ function renderCatalogueResults() {
   }));
   const isBestValue = ({ comparison }) => comparison
     && comparison.unitPrice === rankings.get(comparison.dimension)?.best;
-  const groupedMatches = new Map(defaultStores.map((retailer) => [retailer.id, []]));
-  matches.forEach((match) => groupedMatches.get(match.store.storeId)?.push(match));
-  groupedMatches.forEach((retailerMatches) => retailerMatches.sort((left, right) => {
-    const suggestedOrder = Number(isBestValue(right)) - Number(isBestValue(left));
-    if (suggestedOrder) return suggestedOrder;
-    if (left.comparison && right.comparison && left.comparison.dimension === right.comparison.dimension) {
-      return left.comparison.unitPrice - right.comparison.unitPrice;
-    }
-    if (left.comparison && !right.comparison) return -1;
-    if (!left.comparison && right.comparison) return 1;
-    return left.store.productName.localeCompare(right.store.productName);
-  }));
-
-  const storesWithMatches = defaultStores.filter((retailer) => groupedMatches.get(retailer.id)?.length);
-  if (!storesWithMatches.some((retailer) => retailer.id === state.activeCatalogueRetailer)) {
-    state.activeCatalogueRetailer = storesWithMatches[0]?.id || defaultStores[0].id;
+  if (state.cataloguePage === 1) {
+    matches.sort((left, right) => {
+      const suggestedOrder = Number(isBestValue(right)) - Number(isBestValue(left));
+      if (suggestedOrder) return suggestedOrder;
+      if (left.comparison && right.comparison && left.comparison.dimension === right.comparison.dimension) {
+        return left.comparison.unitPrice - right.comparison.unitPrice;
+      }
+      if (left.comparison && !right.comparison) return -1;
+      if (!left.comparison && right.comparison) return 1;
+      return comparisonStoreOrder.indexOf(left.store.storeId) - comparisonStoreOrder.indexOf(right.store.storeId);
+    });
   }
 
-  defaultStores.forEach((retailer) => {
-    const retailerMatches = groupedMatches.get(retailer.id) || [];
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.className = "catalogue-retailer-tab";
-    tab.dataset.retailerTab = retailer.id;
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", String(state.activeCatalogueRetailer === retailer.id));
-    tab.innerHTML = `<span>${escapeHtml(retailer.name)}</span><strong>${retailerMatches.length}</strong>`;
-    tab.addEventListener("click", () => {
-      state.activeCatalogueRetailer = retailer.id;
-      renderCatalogueResults();
-    });
-    tabs.appendChild(tab);
-
-    const column = document.createElement("section");
-    column.className = `catalogue-retailer-column retailer-${retailer.id}`;
-    column.dataset.retailerColumn = retailer.id;
-    column.setAttribute("role", "tabpanel");
-    column.classList.toggle("is-active", state.activeCatalogueRetailer === retailer.id);
-    column.innerHTML = `
-      <header class="catalogue-retailer-heading">
-        <span class="retailer-initial" aria-hidden="true">${escapeHtml(retailer.name.charAt(0))}</span>
-        <div><h3>${escapeHtml(retailer.name)}</h3><p>${retailerMatches.length ? `${retailerMatches.length} closest matches` : "No priced matches yet"}</p></div>
-      </header>
-      <div class="catalogue-retailer-matches"></div>
+  matches.forEach((match) => {
+    const article = document.createElement("article");
+    const { product, store, comparison } = match;
+    const isBestPrice = state.cataloguePage === 1 && isBestValue(match);
+    const isSuggested = isBestPrice;
+    const ranking = comparison ? rankings.get(comparison.dimension) : null;
+    const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
+    article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
+    const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
+    const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
+    const bestPriceBadge = isBestPrice
+      ? `<span class="best-price-badge">${isSuggested ? "Suggested - " : ""}Best price per ${comparison.comparisonUnit}${saving > 0 ? ` - ${formatMoney(saving)}/${comparison.comparisonUnit} less` : ""}</span>`
+      : "";
+    const unitPrice = comparison
+      ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
+      : "";
+    const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
+    const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
+    const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
+    article.innerHTML = `
+      <div class="catalogue-image">${image}</div>
+      <div class="catalogue-product-copy">
+        ${bestPriceBadge}
+        <strong>${escapeHtml(store.storeName)}</strong>
+        <span>${escapeHtml(productName)}</span>
+        <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
+        ${special}
+        ${link}
+      </div>
+      <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
     `;
-    const columnMatches = column.querySelector(".catalogue-retailer-matches");
-    if (!retailerMatches.length) {
-      columnMatches.innerHTML = `<div class="catalogue-retailer-empty">No close match is currently held for this retailer.</div>`;
-    }
-
-    retailerMatches.forEach((match) => {
-      const article = document.createElement("article");
-      const { product, store, comparison } = match;
-      const isBestPrice = isBestValue(match);
-      const ranking = comparison ? rankings.get(comparison.dimension) : null;
-      const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
-      article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
-      const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
-      const promoText = visiblePromoText(store);
-      const special = promoText ? `<small class="catalogue-special">${escapeHtml(promoText)}</small>` : "";
-      const bestPriceBadge = isBestPrice
-        ? `<span class="best-price-badge">Best value${saving > 0 ? ` - ${formatMoney(saving)}/${comparison.comparisonUnit} less` : ""}</span>`
-        : "";
-      const unitPrice = comparison
-        ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
-        : "";
-      const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-      const existing = matchingBasketItem(store, product);
-      article.tabIndex = 0;
-      article.setAttribute("role", "button");
-      article.setAttribute("aria-label", `Show details for ${productName} at ${store.storeName}`);
-      article.innerHTML = `
-        ${productImageMarkup(store.imageUrl, productName, "catalogue-image")}
-        <div class="catalogue-product-copy">
-          ${bestPriceBadge}
-          <span>${escapeHtml(productName)}</span>
-          <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
-          ${special}
-          <small class="catalogue-detail-hint">View product details</small>
-        </div>
-        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${quantityControlMarkup(existing, productName, true)}</div>
-      `;
-      article.addEventListener("click", (event) => {
-        if (event.target.closest(".catalogue-item-control")) return;
-        openProductFocus(product, store, comparison);
-      });
-      article.addEventListener("keydown", (event) => {
-        if (event.target.closest(".catalogue-item-control")) return;
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        openProductFocus(product, store, comparison);
-      });
-      wireQuantityControl(article, product, store, state.catalogueQuery);
-      columnMatches.appendChild(article);
-    });
-    wrap.appendChild(column);
+    article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store));
+    wrap.appendChild(article);
   });
-  watchProductImages(wrap);
 }
 
-async function addCatalogueProductToBasket(product, store, preferredQuery = "") {
+async function addCatalogueProductToBasket(product, store) {
   const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-  const existing = matchingBasketItem(store, product);
+  const existing = state.items.find((item) => item.links?.[store.storeId] === store.url);
   if (existing) {
-    existing.quantity = wholeQuantity(existing.quantity) + 1;
-    state.latest = null;
-    renderItems();
-    renderResults();
-    await saveAll();
-    clearCatalogueNotice();
-    document.querySelector(`[data-id="${CSS.escape(existing.id)}"]`)?.classList.add("just-updated");
-    renderCatalogueResults();
-    if (state.specialsLoaded) renderSpecials();
-    scheduleBasketScan(150);
+    $("#catalogueStatus").textContent = `${productName} is already in the basket.`;
     return;
   }
-  const item = {
+  state.items.push({
     id: `${product.id}-${store.storeId}-${Date.now()}`,
     name: productName,
     query: productName,
-    comparisonQuery: buildComparisonQuery(product, store, preferredQuery),
     targetSize: store.size || product.targetSize || "",
     quantity: 1,
     category: product.category || "",
-    selectedProductId: product.id,
-    selectedProductName: productName,
-    selectedBrand: store.brand || "",
-    imageUrl: store.imageUrl || "",
     selectedStoreId: store.storeId,
     selectedStoreName: store.storeName,
     selectedPrice: store.price,
     links: { [store.storeId]: store.url || "" },
-  };
-  state.items.push(item);
-  state.latest = null;
+  });
   renderItems();
-  renderResults();
   await saveAll();
-  setCatalogueNotice(`${productName} added to your basket.`, "success", 3200);
-  document.querySelector(`[data-id="${CSS.escape(item.id)}"]`)?.classList.add("just-updated");
-  renderCatalogueResults();
-  if (state.specialsLoaded) renderSpecials();
+  $("#catalogueStatus").textContent = `${productName} added to the basket.`;
   scheduleBasketScan(150);
 }
 
-async function searchCatalogue(options = {}) {
-  const query = String(options.queryOverride ?? $("#catalogueSearchInput").value).trim();
-  const allowCorrection = options.allowCorrection !== false;
+async function searchCatalogue(page = 1) {
+  const query = $("#catalogueSearchInput").value.trim();
   if (!query) {
-    setCatalogueNotice("Type a product to compare.");
+    $("#catalogueStatus").textContent = "Type a product to compare.";
     return;
   }
   const button = $("#catalogueSearchBtn");
-  rememberItemSearch(query);
-  state.catalogueQuery = query;
-  readSettingsFromDom();
-  const matchesPerRetailer = Math.min(12, Math.max(1, Number(state.settings.maxResultsPerStore || 6)));
   button.disabled = true;
   $("#catalogueLoading").hidden = false;
-  setCatalogueNotice("Finding the closest retailer matches...");
+  $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
-    const correctionQuery = allowCorrection ? "" : "&correct=false";
-    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}${locationQuery()}${correctionQuery}`);
+    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
-    const matchedRetailers = new Set(state.catalogueRetailerMatches
-      .flatMap((product) => product.stores || [])
-      .filter((store) => store.price != null)
-      .map((store) => store.storeId));
-    if (payload.correctionApplied && payload.correctedQuery) {
-      setCatalogueCorrectionNotice(query, payload.correctedQuery);
-    } else {
-      setCatalogueNotice(state.catalogueResults.length
-        ? `${state.catalogueResults.length} close matches across ${matchedRetailers.size} retailers`
-        : "No priced catalogue matches yet.");
-    }
-    renderItemSuggestions();
+    state.cataloguePage = payload.page || page;
+    state.catalogueHasMore = Boolean(payload.hasMore);
+    $("#catalogueStatus").textContent = state.catalogueResults.length
+      ? `Comparable unit prices for ${query}`
+      : "No priced catalogue matches yet.";
     renderCatalogueResults();
   } catch (error) {
-    $("#catalogueStatus").className = "catalogue-status notice-warning";
     $("#catalogueStatus").innerHTML = `We could not load product matches. <button class="inline-retry" type="button">Try again</button>`;
-    $("#catalogueStatus .inline-retry")?.addEventListener("click", searchCatalogue);
+    $("#catalogueStatus .inline-retry")?.addEventListener("click", () => searchCatalogue(page));
   } finally {
     button.disabled = false;
     $("#catalogueLoading").hidden = true;
@@ -853,9 +443,7 @@ function readItemsFromDom() {
   const rows = new Map([...$("#itemsBody").querySelectorAll("tr")].map((row) => [row.dataset.id, row]));
   state.items = state.items.map((item) => {
     const quantityInput = rows.get(item.id)?.querySelector('[data-field="quantity"]');
-    const quantity = wholeQuantity(quantityInput?.value || item.quantity || 1);
-    if (quantityInput) quantityInput.value = String(quantity);
-    return { ...item, quantity };
+    return { ...item, quantity: Number(quantityInput?.value || item.quantity || 1) };
   });
 }
 
@@ -880,134 +468,81 @@ function renderBasketTotals(scan) {
   const wrap = $("#basketTotals");
   wrap.innerHTML = "";
   if (!scan) return;
-  const totals = Object.values(scan.basketTotals || {}).sort((left, right) => {
-    const leftComplete = left.missing === 0;
-    const rightComplete = right.missing === 0;
-    if (leftComplete !== rightComplete) return leftComplete ? -1 : 1;
-    if (!leftComplete && left.missing !== right.missing) return left.missing - right.missing;
-    return left.total - right.total;
-  });
-  if (!totals.some((total) => total.storeId === state.activeBasketRetailer)) {
-    state.activeBasketRetailer = totals[0]?.storeId || "";
-  }
-  totals.forEach((total) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = [
-      "total-chip",
-      scan.bestBasketStoreId === total.storeId ? "best" : "",
-      total.missing ? "incomplete" : "",
-      state.activeBasketRetailer === total.storeId ? "is-active" : "",
-    ].filter(Boolean).join(" ");
-    chip.setAttribute("aria-pressed", String(state.activeBasketRetailer === total.storeId));
+  Object.values(scan.basketTotals).forEach((total) => {
+    const chip = document.createElement("div");
+    chip.className = `total-chip ${scan.bestBasketStoreId === total.storeId ? "best" : ""}`;
     const label = total.missing
-      ? `${total.missing} ${total.missing === 1 ? "item" : "items"} missing`
-      : "Full basket";
+      ? `${total.storeName} known total, ${total.missing} missing`
+      : `${total.storeName} full basket`;
     chip.innerHTML = `
-      <span class="total-chip-store">${escapeHtml(total.storeName)}</span>
-      <strong>${total.total || total.missing === 0 ? formatMoney(total.total) : "No priced items"}</strong>
-      <small>${label}</small>
+      <span>${label}</span>
+      <strong>${total.total ? formatMoney(total.total) : "-"}</strong>
     `;
-    chip.addEventListener("click", () => {
-      state.activeBasketRetailer = total.storeId;
-      renderResults();
-    });
     wrap.appendChild(chip);
   });
 }
 
 function renderResults() {
   const wrap = $("#results");
-  const emptyResults = $("#emptyResults");
   wrap.innerHTML = "";
-  emptyResults.innerHTML = "<strong>No basket totals yet.</strong><span>Add a product and RandBasket will compare available totals automatically.</span>";
   renderBasketTotals(state.latest);
   if (!state.latest) {
-    emptyResults.hidden = state.items.length > 0;
-    if (state.items.length) {
-      wrap.innerHTML = state.items.map((item) => `
-        <article class="result-card">
-          <div class="result-head">
-            <div class="result-product-heading">
-              ${productImageMarkup(item.imageUrl, item.name, "result-product-image")}
-              <div>
-              <h3>${escapeHtml(item.name)}</h3>
-              <div class="status">${escapeHtml(item.comparisonQuery || item.query || item.name)} - finding closest retailer matches...</div>
-              </div>
+    $("#emptyResults").hidden = false;
+    return;
+  }
+  $("#emptyResults").hidden = true;
+  state.latest.scans.forEach((scan) => {
+    const card = document.createElement("article");
+    card.className = "result-card";
+    const rows = scan.results
+      .map((result) => {
+        const isBest = scan.bestStoreId === result.storeId;
+        const adjustment = result.valueAdjustments?.length
+          ? ` after ${result.valueAdjustments.map((a) => a.label).join(", ")}`
+          : "";
+        const hasPrice = result.effectivePrice != null;
+        const measure = result.productMeasure?.label ? ` (${result.productMeasure.label})` : "";
+        const normalized = hasPrice && result.normalizedPrice != null && result.normalizedPrice !== result.effectivePrice
+          ? ` -> ${formatMoney(result.normalizedPrice)} target`
+          : "";
+        const dealLine = result.promoText
+          ? `<small class="deal-line ${result.promoApplied ? "applied" : "note"}">${escapeHtml(result.promoText)}</small>`
+          : "";
+        const wasPrice = hasPrice && result.regularPrice && result.regularPrice > result.price
+          ? `<span class="was-price">${formatMoney(result.regularPrice)}</span>`
+          : "";
+        const product = hasPrice
+          ? `${result.productName || "Matched product"}${measure}${adjustment}${normalized}`
+          : "Price not readable - direct supplier link:";
+        const link = hasPrice ? result.productUrl || result.queryUrl : result.queryUrl || result.productUrl;
+        const linkHtml = link
+          ? `<a class="direct-url" href="${escapeAttr(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a>`
+          : `<span class="direct-url muted">No direct link available</span>`;
+        return `
+          <div class="price-row ${isBest ? "best" : ""}">
+            <div class="supplier-result">
+              <strong>${result.storeName}</strong>
+              <small>${escapeHtml(product)}</small>
+              ${dealLine}
+              ${linkHtml}
             </div>
-            <span class="badge">Updating</span>
+            <div class="price">${wasPrice}${formatMoney(result.effectivePrice)}</div>
           </div>
-        </article>
-      `).join("");
-      watchProductImages(wrap);
-    }
-    return;
-  }
-  emptyResults.hidden = true;
-  const total = state.latest.basketTotals?.[state.activeBasketRetailer];
-  if (!total) {
-    emptyResults.hidden = false;
-    emptyResults.innerHTML = "<strong>No retailers selected.</strong><span>Enable at least one retailer in Value Settings to compare this basket.</span>";
-    return;
-  }
-  const basketRows = state.latest.scans.map((scan) => {
-    const basketItem = state.items.find((item) => item.id === scan.itemId);
-    const result = scan.results.find((entry) => entry.storeId === state.activeBasketRetailer);
-    const hasPrice = result?.lineTotal != null;
-    const target = [scan.name, scan.targetMeasure?.label].filter(Boolean).join(" - ");
-    const matchedName = hasPrice ? cleanDisplayText(result.productName) || "Matched product" : "No close match found";
-    const pack = result?.productMeasure?.label || "";
-    const normalized = hasPrice && result.normalizedPrice != null && result.normalizedPrice !== result.effectivePrice
-      ? `${formatMoney(result.normalizedPrice)} adjusted to target size`
-      : "";
-    const details = [pack, normalized].filter(Boolean).join(" - ");
-    const promoText = result ? visiblePromoText(result) : "";
-    const promo = promoText
-      ? `<small class="retailer-basket-promo">${escapeHtml(promoText)}</small>`
-      : "";
-    const wasPrice = hasPrice && result.regularPrice && result.regularPrice > result.price
-      ? `<span class="was-price">${formatMoney(result.regularPrice)}</span>`
-      : "";
-    return `
-      <div class="retailer-basket-row${hasPrice ? "" : " is-missing"}">
-        <div class="retailer-basket-product" data-label="Product">
-          ${productImageMarkup(result?.imageUrl || basketItem?.imageUrl, matchedName, "retailer-basket-image")}
-          <div>
-            <strong>${escapeHtml(matchedName)}</strong>
-            <span>For ${escapeHtml(target)}</span>
-            ${details ? `<small>${escapeHtml(details)}</small>` : ""}
-            ${promo}
-          </div>
-        </div>
-        <div class="retailer-basket-number" data-label="Unit price">${wasPrice}<strong>${formatMoney(result?.effectivePrice)}</strong></div>
-        <div class="retailer-basket-number" data-label="Qty"><strong>${wholeQuantity(scan.quantity)}</strong></div>
-        <div class="retailer-basket-number line-total" data-label="Line total"><strong>${formatMoney(result?.lineTotal)}</strong></div>
-      </div>
-    `;
-  }).join("");
-  const isBest = state.latest.bestBasketStoreId === total.storeId && total.missing === 0;
-  wrap.innerHTML = `
-    <section class="retailer-basket-view${isBest ? " best-basket" : ""}${total.missing ? " incomplete-basket" : ""}">
-      <header class="retailer-basket-header">
+        `;
+      })
+      .join("");
+    card.innerHTML = `
+      <div class="result-head">
         <div>
-          <span>${isBest ? "Cheapest complete basket" : total.missing ? "Incomplete comparison" : "Complete basket"}</span>
-          <h3>${escapeHtml(total.storeName)}</h3>
-          <p>${total.missing ? `${total.missing} ${total.missing === 1 ? "item is" : "items are"} still missing from this retailer.` : "Every basket item has a close catalogue match."}</p>
+          <h3>${escapeHtml(scan.name)}</h3>
+          <div class="status">${escapeHtml(scan.query)}${scan.targetMeasure?.label ? ` - target ${escapeHtml(scan.targetMeasure.label)}` : ""} - qty ${scan.quantity}</div>
         </div>
-        <div class="retailer-basket-total">
-          <span>${total.missing ? "Known subtotal" : "Basket total"}</span>
-          <strong>${formatMoney(total.total)}</strong>
-        </div>
-      </header>
-      <div class="retailer-basket-table">
-        <div class="retailer-basket-table-head" aria-hidden="true">
-          <span>Product</span><span>Unit price</span><span>Qty</span><span>Line total</span>
-        </div>
-        ${basketRows}
+        <span class="badge">${scan.bestStoreName || "No match"}</span>
       </div>
-    </section>
-  `;
-  watchProductImages(wrap);
+      ${rows}
+    `;
+    wrap.appendChild(card);
+  });
 }
 
 function escapeHtml(value) {
@@ -1088,27 +623,12 @@ function scheduleBasketScan(delay = 500) {
   }, delay);
 }
 
-function backfillBasketImages(scan) {
-  let changed = false;
-  state.items = state.items.map((item) => {
-    if (item.imageUrl) return item;
-    const itemScan = scan?.scans?.find((entry) => entry.itemId === item.id);
-    const preferred = itemScan?.results?.find((result) =>
-      result.storeId === item.selectedStoreId && result.imageUrl);
-    const available = preferred || itemScan?.results?.find((result) => result.imageUrl);
-    if (!available?.imageUrl) return item;
-    changed = true;
-    return { ...item, imageUrl: available.imageUrl };
-  });
-  return changed;
-}
-
 async function runScan({ automatic = false } = {}) {
   readItemsFromDom();
   readSettingsFromDom();
   if (!state.items.length) {
     setText("#scanStatus", "Add an item to begin");
-    if (!automatic) $("#weeklyStaples")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!automatic) $("#emptyBasket").scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
   if (state.autoScanTimer) {
@@ -1131,7 +651,6 @@ async function runScan({ automatic = false } = {}) {
       method: "POST",
       body: JSON.stringify({ items: state.items, settings: state.settings }),
     });
-    if (backfillBasketImages(state.latest)) renderItems();
     await saveAll();
     $("#scanStatus").textContent = `Updated ${new Date(state.latest.createdAt).toLocaleString()}`;
     updateSummary();
@@ -1152,7 +671,7 @@ async function runScan({ automatic = false } = {}) {
 function addItem() {
   $("#catalogueSearchInput").focus();
   $("#catalogueSearchInput").scrollIntoView({ behavior: "smooth", block: "center" });
-  setCatalogueNotice("Search for an item, then choose the match you want.");
+  $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
 }
 
 function setSpecialsOpen(open) {
@@ -1175,17 +694,9 @@ function renderSpecials() {
   }
   state.specials.forEach((special) => {
     const store = special.store;
-    const product = {
-      id: special.productId,
-      canonicalName: special.canonicalName,
-      category: special.category,
-      targetSize: special.targetSize,
-    };
     const card = document.createElement("article");
     card.className = "special-card";
     const productName = cleanDisplayText(store.productName || special.canonicalName) || "Special";
-    const existing = matchingBasketItem(store, product);
-    const promoText = visiblePromoText(store);
     const image = store.imageUrl
       ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />`
       : `<div class="catalogue-image-placeholder">Catalogue offer</div>`;
@@ -1194,30 +705,22 @@ function renderSpecials() {
       <div class="special-card-copy">
         <span class="special-pill">${special.discountPercent ? `${special.discountPercent}% off` : "Catalogue special"}</span>
         <strong>${escapeHtml(productName)}</strong>
-        <small>${escapeHtml([store.storeName, store.size, special.category].filter(Boolean).join(" - "))}</small>
-        ${promoText ? `<p>${escapeHtml(promoText)}</p>` : ""}
+        <small>${escapeHtml([store.storeName, store.size, special.category].filter(Boolean).join(" · "))}</small>
+        ${store.promoText ? `<p>${escapeHtml(store.promoText)}</p>` : ""}
       </div>
       <div class="special-card-price">
-        ${store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
+        ${store.regularPrice ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
         <strong>${formatMoney(store.price)}</strong>
         ${special.saving ? `<small>Save ${formatMoney(special.saving)}</small>` : ""}
-        ${quantityControlMarkup(existing, productName, true, "Add to basket")}
+        <button type="button">Add to basket</button>
       </div>
     `;
-    card.tabIndex = 0;
-    card.setAttribute("role", "button");
-    card.setAttribute("aria-label", `Show details for ${productName} at ${store.storeName}`);
-    card.addEventListener("click", (event) => {
-      if (event.target.closest(".catalogue-item-control")) return;
-      openProductFocus(product, store, getUnitComparison(product, store), special.canonicalName);
-    });
-    card.addEventListener("keydown", (event) => {
-      if (event.target.closest(".catalogue-item-control")) return;
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      openProductFocus(product, store, getUnitComparison(product, store), special.canonicalName);
-    });
-    wireQuantityControl(card, product, store, special.canonicalName);
+    card.querySelector("button").addEventListener("click", () => addCatalogueProductToBasket({
+      id: special.productId,
+      canonicalName: special.canonicalName,
+      category: special.category,
+      targetSize: special.targetSize,
+    }, store));
     wrap.appendChild(card);
   });
 }
@@ -1228,8 +731,7 @@ async function loadSpecials() {
   $("#specialsStatus").textContent = "Loading current verified offers...";
   try {
     const retailerQuery = retailer ? `&retailer=${encodeURIComponent(retailer)}` : "";
-    const balancedQuery = retailer ? "" : "&perRetailer=6";
-    const payload = await api(`/v1/specials?limit=30${balancedQuery}${retailerQuery}${locationQuery()}`);
+    const payload = await api(`/v1/specials?limit=30${retailerQuery}${locationQuery()}`);
     state.specials = payload.specials || [];
     state.specialsLoaded = true;
     $("#specialsStatus").textContent = state.specials.length
@@ -1250,43 +752,40 @@ function getSavedBaskets() {
 function renderSavedBaskets() {
   const wrap = $("#savedBasketList");
   const baskets = getSavedBaskets();
-  wrap.innerHTML = baskets.length ? "" : `<div class="empty saved-empty">You have not saved a basket yet.</div>`;
+  wrap.innerHTML = baskets.length ? "" : `<div class="empty saved-empty">No named baskets saved yet.</div>`;
   baskets.forEach((basket) => {
     const row = document.createElement("div");
     row.className = "saved-basket-row";
-    row.innerHTML = `<div><strong>${escapeHtml(basket.name)}</strong><span>${basket.items.length} items - ${new Date(basket.updatedAt).toLocaleDateString()}</span></div><div><button type="button" data-load="${basket.id}">Load</button><button type="button" data-delete="${basket.id}">Delete</button></div>`;
+    row.innerHTML = `<div><strong>${escapeHtml(basket.name)}</strong><span>${basket.items.length} items · ${new Date(basket.updatedAt).toLocaleDateString()}</span></div><div><button type="button" data-load="${basket.id}">Load</button><button type="button" data-delete="${basket.id}">Delete</button></div>`;
     wrap.appendChild(row);
   });
 }
 
-function openBasketDialog(message = "") {
+function openBasketDialog() {
   renderSavedBaskets();
-  setText("#basketDialogStatus", message);
   if (!$("#basketDialog").open) $("#basketDialog").showModal();
 }
 
 function saveNamedBasket() {
   readItemsFromDom();
   readSettingsFromDom();
-  if (!state.items.length) { setText("#basketDialogStatus", "Add at least one item before saving this basket."); return; }
+  if (!state.items.length) { setText("#basketDialogStatus", "Add at least one product before saving."); return; }
   const name = $("#basketNameInput").value.trim();
-  if (!name) { setText("#basketDialogStatus", "Enter a basket name to save it."); return; }
+  if (!name) { setText("#basketDialogStatus", "Give this basket a name first."); return; }
   const baskets = getSavedBaskets();
   const old = baskets.find((basket) => basket.name.toLowerCase() === name.toLowerCase());
   const entry = { id: old?.id || `${Date.now()}`, name, items: state.items, settings: state.settings, latest: state.latest, updatedAt: new Date().toISOString() };
   localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify([entry, ...baskets.filter((basket) => basket.id !== entry.id)].slice(0, 20)));
-  setText("#basketDialogStatus", `"${name}" is saved on this device.`);
+  setText("#basketDialogStatus", `${name} saved on this device.`);
   renderSavedBaskets();
-  updateBasketActions();
 }
 
 function loadSavedBasket(id) {
   const basket = getSavedBaskets().find((entry) => entry.id === id);
   if (!basket) return;
-  state.items = (basket.items || []).map((item) => ({ ...item, quantity: wholeQuantity(item.quantity) }));
+  state.items = basket.items || [];
   state.settings = basket.settings || state.settings;
   state.latest = basket.latest || null;
-  state.activeBasketRetailer = "";
   renderStores(); renderLocation(); renderItems(); renderResults(); updateSummary(); saveDeviceState();
   $("#basketDialog").close();
   scheduleBasketScan(150);
@@ -1295,74 +794,21 @@ function loadSavedBasket(id) {
 function deleteSavedBasket(id) {
   localStorage.setItem(SAVED_BASKETS_KEY, JSON.stringify(getSavedBaskets().filter((entry) => entry.id !== id)));
   renderSavedBaskets();
-  updateBasketActions();
 }
 
-function encodeSharedBasket(value) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
-}
-
-function decodeSharedBasket(value) {
-  const base64 = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-  const binary = atob(padded);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-
-function fallbackCopyShareLink(url) {
-  const input = document.createElement("textarea");
-  input.value = url;
-  input.setAttribute("readonly", "");
-  input.style.position = "fixed";
-  input.style.opacity = "0";
-  document.body.appendChild(input);
-  input.select();
-  const copied = document.execCommand("copy");
-  input.remove();
-  if (copied) {
-    setText("#scanStatus", "Share link copied");
-    return;
-  }
-  window.prompt("Copy this basket link:", url);
-}
-
-async function shareBasket() {
+function shareBasket() {
   readItemsFromDom();
-  if (!state.items.length) {
-    if (getSavedBaskets().some((basket) => basket.items?.length)) {
-      openBasketDialog("Load a saved basket first, then select Share basket again.");
-    } else {
-      setText("#scanStatus", "Add or save a basket before sharing.");
-    }
-    return;
-  }
+  if (!state.items.length) { setText("#scanStatus", "Add at least one product before sharing."); return; }
   const cleanSettings = { ...state.settings };
   delete cleanSettings.location;
-  const payload = encodeSharedBasket({ items: state.items, settings: cleanSettings });
-  const url = `${location.origin}${location.pathname}?basket=${payload}`;
-  try {
-    if (navigator.share) {
-      await navigator.share({
-        title: "My RandBasket grocery basket",
-        text: "Compare this grocery basket on RandBasket.",
-        url,
-      });
-      setText("#scanStatus", "Basket shared");
-      return;
-    }
-    if (navigator.clipboard?.writeText && window.isSecureContext) {
-      await navigator.clipboard.writeText(url);
-      setText("#scanStatus", "Share link copied");
-      return;
-    }
-    fallbackCopyShareLink(url);
-  } catch (error) {
-    if (error?.name === "AbortError") return;
-    fallbackCopyShareLink(url);
+  const payload = btoa(unescape(encodeURIComponent(JSON.stringify({ items: state.items, settings: cleanSettings }))));
+  const url = `${location.origin}${location.pathname}?basket=${encodeURIComponent(payload)}`;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => setText("#scanStatus", "Share link copied"))
+      .catch(() => window.prompt("Copy this basket link:", url));
+  } else {
+    window.prompt("Copy this basket link:", url);
   }
 }
 
@@ -1370,21 +816,15 @@ function importSharedBasket() {
   const payload = new URLSearchParams(location.search).get("basket");
   if (!payload) return;
   try {
-    let shared;
-    try {
-      shared = decodeSharedBasket(payload);
-    } catch {
-      shared = JSON.parse(decodeURIComponent(escape(atob(payload))));
-    }
+    const shared = JSON.parse(decodeURIComponent(escape(atob(payload))));
     if (!Array.isArray(shared.items)) return;
     if (state.items.length && !window.confirm("Replace your current basket with the shared basket?")) {
       history.replaceState({}, "", location.pathname + location.hash);
       return;
     }
-    state.items = shared.items.map((item) => ({ ...item, quantity: wholeQuantity(item.quantity) }));
+    state.items = shared.items;
     state.settings = { ...state.settings, ...(shared.settings || {}) };
     state.latest = null;
-    state.activeBasketRetailer = "";
     saveDeviceState();
     history.replaceState({}, "", location.pathname + location.hash);
     setText("#scanStatus", "Shared basket loaded");
@@ -1479,16 +919,9 @@ function submitFeedback(event) {
 
 function wireEvents() {
   $("#addItemBtn").addEventListener("click", addItem);
-  $("#saveBtn").addEventListener("click", () => openBasketDialog());
+  $("#saveBtn").addEventListener("click", openBasketDialog);
   $("#shareBtn").addEventListener("click", shareBasket);
   $("#basketDialogClose").addEventListener("click", () => $("#basketDialog").close());
-  $("#basketDialog").addEventListener("click", (event) => {
-    if (event.target === event.currentTarget) $("#basketDialog").close();
-  });
-  $("#productFocusCloseBtn").addEventListener("click", () => $("#productFocusDialog").close());
-  $("#productFocusDialog").addEventListener("click", (event) => {
-    if (event.target === event.currentTarget) $("#productFocusDialog").close();
-  });
   $("#basketSaveNamedBtn").addEventListener("click", saveNamedBasket);
   $("#savedBasketList").addEventListener("click", (event) => {
     if (event.target.dataset.load) loadSavedBasket(event.target.dataset.load);
@@ -1497,7 +930,7 @@ function wireEvents() {
   document.querySelectorAll("[data-starter]").forEach((button) => button.addEventListener("click", () => {
     $("#catalogueSearchInput").value = button.dataset.starter;
     $("#compare").scrollIntoView({ behavior: "smooth" });
-    searchCatalogue();
+    searchCatalogue(1);
   }));
   $("#appMenuBtn").addEventListener("click", () => {
     const menu = $("#appMobileMenu");
@@ -1519,12 +952,12 @@ function wireEvents() {
   $("#locationBtn").addEventListener("click", requestLocation);
   $("#locationAllowBtn").addEventListener("click", requestLocation);
   $("#locationDeclineBtn").addEventListener("click", declineLocation);
-  $("#catalogueSearchBtn").addEventListener("click", () => searchCatalogue());
+  $("#catalogueSearchBtn").addEventListener("click", () => searchCatalogue(1));
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") searchCatalogue();
+    if (event.key === "Enter") searchCatalogue(1);
   });
-  $("#catalogueSearchInput").addEventListener("input", scheduleItemSuggestions);
-  $("#catalogueSearchInput").addEventListener("focus", () => renderItemSuggestions());
+  $("#cataloguePreviousBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage - 1));
+  $("#catalogueMoreBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage + 1));
   $("#specialsToggle").addEventListener("click", () => {
     setSpecialsOpen($("#specialsToggle").getAttribute("aria-expanded") !== "true");
   });
@@ -1533,32 +966,17 @@ function wireEvents() {
   });
   $("#specialsRefreshBtn").addEventListener("click", loadSpecials);
   $("#specialsRetailer").addEventListener("change", loadSpecials);
-  $("#maxResultsInput").addEventListener("change", () => {
-    scheduleBasketScan();
-    if (state.catalogueQuery) searchCatalogue();
-  });
+  $("#maxResultsInput").addEventListener("change", () => scheduleBasketScan());
   $("#storeToggles").addEventListener("change", () => scheduleBasketScan());
   $("#itemsBody").addEventListener("input", (event) => {
-    if (!event.target.matches('[data-field="quantity"]')) return;
-    if (event.target.value !== "") event.target.value = String(wholeQuantity(event.target.value));
-    clearCatalogueNotice();
-    scheduleBasketScan(650);
-  });
-  $("#itemsBody").addEventListener("change", (event) => {
-    if (!event.target.matches('[data-field="quantity"]')) return;
-    readItemsFromDom();
-    renderCatalogueResults();
-    if (state.specialsLoaded) renderSpecials();
+    if (event.target.matches('[data-field="quantity"]')) scheduleBasketScan(650);
   });
   $("#itemsBody").addEventListener("click", (event) => {
     const removeId = event.target.dataset.remove;
     if (!removeId) return;
     readItemsFromDom();
     state.items = state.items.filter((item) => item.id !== removeId);
-    clearCatalogueNotice();
     renderItems();
-    renderCatalogueResults();
-    if (state.specialsLoaded) renderSpecials();
     updateSummary();
     scheduleBasketScan(150);
   });
@@ -1571,9 +989,7 @@ async function init() {
   } catch {
     saved = {};
   }
-  state.items = Array.isArray(saved.items)
-    ? saved.items.map((item) => ({ ...item, quantity: wholeQuantity(item.quantity) }))
-    : [];
+  state.items = Array.isArray(saved.items) ? saved.items : [];
   state.settings = saved.settings || {
     maxResultsPerStore: 6,
     stores: Object.fromEntries(defaultStores.map((store) => [store.id, true])),
@@ -1585,14 +1001,12 @@ async function init() {
   renderStores();
   renderLocation();
   renderItems();
-  renderItemSuggestions();
   renderResults();
   updateSummary();
   wireEvents();
   if (state.latest?.createdAt) {
     setText("#scanStatus", `Updated ${new Date(state.latest.createdAt).toLocaleString()}`);
-  }
-  if (state.items.length && (!state.latest || state.items.some((item) => !item.imageUrl))) {
+  } else if (state.items.length) {
     scheduleBasketScan(250);
   }
   if (window.location.hash === "#suggestions") {
@@ -1611,6 +1025,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=34").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=26").catch(() => {});
   });
 }
