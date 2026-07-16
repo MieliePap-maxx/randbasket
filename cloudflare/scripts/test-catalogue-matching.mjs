@@ -71,6 +71,7 @@ validCharacteristics("chicken portions 1kg", "fresh chicken portions 2kg");
 invalidCharacteristics("chicken portions 1kg", "pork portions 1kg");
 
 validCharacteristics("cake flour 2.5kg", "wheat cake flour 2.5kg");
+validCharacteristics("cake flour 2.5kg", "cake wheat flour 2.5kg");
 invalidCharacteristics("cake flour 2.5kg", "self raising flour 2.5kg");
 
 const ranked = sortClosestCandidates([

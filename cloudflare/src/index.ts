@@ -341,7 +341,6 @@ const characteristicGroups = [
   { terms: ["plain", "chocolate", "strawberry", "vanilla", "flavoured", "flavored"], required: true },
   { terms: ["white", "brown", "whole wheat", "wholewheat"], required: true },
   { terms: ["beef", "chicken", "pork", "lamb", "turkey", "venison"], required: true },
-  { terms: ["self raising", "cake flour", "bread flour", "whole wheat flour"], required: true },
 ];
 
 function includesPhrase(text: string, phrase: string) {
@@ -355,9 +354,23 @@ function eggSize(text: string) {
     .find((size) => includesPhrase(normalized, size)) || "";
 }
 
+function flourType(text: string) {
+  const normalized = clean(text);
+  if (!/\bflour\b/.test(normalized)) return "";
+  if (includesPhrase(normalized, "self raising")) return "self raising";
+  if (includesPhrase(normalized, "whole wheat") || includesPhrase(normalized, "wholewheat")) return "whole wheat";
+  if (includesPhrase(normalized, "bread")) return "bread";
+  if (includesPhrase(normalized, "cake")) return "cake";
+  return "";
+}
+
 export function compareCharacteristics(referenceText: string, offerText: string) {
   const requestedEggSize = eggSize(referenceText);
   if (requestedEggSize && eggSize(offerText) !== requestedEggSize) {
+    return { valid: false, matches: 0 };
+  }
+  const requestedFlourType = flourType(referenceText);
+  if (requestedFlourType && flourType(offerText) !== requestedFlourType) {
     return { valid: false, matches: 0 };
   }
   let matches = 0;
