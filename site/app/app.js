@@ -27,6 +27,10 @@ const moneyFmt = new Intl.NumberFormat("en-ZA", {
 });
 
 const $ = (selector) => document.querySelector(selector);
+const setText = (selector, value) => {
+  const element = $(selector);
+  if (element) element.textContent = value;
+};
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_ORIGIN}${path}`, {
@@ -217,13 +221,14 @@ function getUnitComparison(product, store) {
 }
 
 function updateSummary() {
-  $("#itemCount").textContent = state.items.length;
-  $("#maxResultsInput").value = state.settings.maxResultsPerStore || 6;
+  setText("#itemCount", state.items.length);
+  const maxResultsInput = $("#maxResultsInput");
+  if (maxResultsInput) maxResultsInput.value = state.settings.maxResultsPerStore || 6;
 
   const latest = state.latest;
   const bestId = latest?.bestBasketStoreId;
   const best = bestId ? latest.basketTotals[bestId] : null;
-  $("#bestBasket").textContent = best ? `${best.storeName} ${formatMoney(best.total)}` : "No scan yet";
+  setText("#bestBasket", best ? `${best.storeName} ${formatMoney(best.total)}` : "No scan yet");
 }
 
 function renderStores() {
@@ -708,11 +713,12 @@ async function init() {
 }
 
 init().catch((error) => {
-  $("#scanStatus").textContent = error.message;
+  setText("#scanStatus", error.message);
+  console.error(error);
 });
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=20").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=21").catch(() => {});
   });
 }
