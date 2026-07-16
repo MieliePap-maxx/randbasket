@@ -1,10 +1,13 @@
 {
   "name": "sa-grocery-price-checker-cloudflare-api",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test:matching": "node scripts/test-catalogue-matching.mjs",
+    "vector:index": "node scripts/index-product-vectors.mjs",
+    "vector:verify": "node scripts/verify-product-vectors.mjs",
     "db:migrate": "wrangler d1 execute randbasket-catalogue --file=schema.sql --remote",
     "catalogue:export": "node scripts/export-catalogue-import.mjs",
     "catalogue:woolworths-promotions": "node scripts/export-woolworths-promotions-import.mjs .wrangler/woolworths-promotions"

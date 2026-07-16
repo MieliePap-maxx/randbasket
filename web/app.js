@@ -164,8 +164,9 @@ async function addCatalogueProductToBasket(product, store) {
   $("#catalogueStatus").textContent = `${store.productName || product.canonicalName} added to the basket.`;
 }
 
-async function searchCatalogue(page = 1) {
-  const query = $("#catalogueSearchInput").value.trim();
+async function searchCatalogue(page = 1, options = {}) {
+  const query = String(options.queryOverride ?? $("#catalogueSearchInput").value).trim();
+  const allowCorrection = options.allowCorrection !== false;
   if (!query) {
     $("#catalogueStatus").textContent = "Type a product to compare.";
     return;
@@ -174,14 +175,28 @@ async function searchCatalogue(page = 1) {
   button.disabled = true;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
-    const payload = await api(`/api/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}`);
+    const correctionQuery = allowCorrection ? "" : "&correct=false";
+    const payload = await api(`/api/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${correctionQuery}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
     state.cataloguePage = payload.page || page;
     state.catalogueHasMore = Boolean(payload.hasMore);
-    $("#catalogueStatus").textContent = state.catalogueResults.length
-      ? `Closest priced matches for ${query}`
-      : "No priced catalogue matches yet.";
+    if (payload.correctionApplied && payload.correctedQuery) {
+      $("#catalogueStatus").className = "catalogue-status catalogue-correction";
+      $("#catalogueStatus").innerHTML = `
+        <span>Showing results for <strong>&ldquo;${escapeHtml(payload.correctedQuery)}&rdquo;</strong></span>
+        <button type="button">Search instead for &ldquo;${escapeHtml(query)}&rdquo;</button>
+      `;
+      $("#catalogueStatus button")?.addEventListener("click", () => {
+        $("#catalogueSearchInput").value = query;
+        searchCatalogue(1, { queryOverride: query, allowCorrection: false });
+      });
+    } else {
+      $("#catalogueStatus").className = "catalogue-status";
+      $("#catalogueStatus").textContent = state.catalogueResults.length
+        ? `Closest priced matches for ${query}`
+        : "No priced catalogue matches yet.";
+    }
     renderCatalogueResults();
   } catch (error) {
     $("#catalogueStatus").textContent = error.message;

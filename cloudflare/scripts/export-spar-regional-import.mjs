@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { addVocabularyText, vocabularySqlStatements } from "./search-vocabulary.mjs";
 
 const [sourcePath, outputPath] = process.argv.slice(2);
 if (!sourcePath || !outputPath) {
@@ -18,6 +19,7 @@ const statements = [
   `-- Reviewed SPAR regional specials valid ${source.validFrom} to ${source.validTo}.`,
   "-- Every offer is tied to the official flipbook and representative store coordinates.",
 ];
+const vocabulary = new Map();
 
 for (const region of source.regions) {
   for (const item of region.items) {
@@ -25,6 +27,7 @@ for (const region of source.regions) {
     const offerId = `spar:${region.key}:${item.id}:${source.campaign}`;
     const terms = [...new Set([...(item.terms || []), item.name])];
     const searchText = clean([item.name, item.size, item.category, ...terms].join(" "));
+    addVocabularyText(vocabulary, item.name, searchText, terms, item.brand || "SPAR");
     statements.push(`INSERT OR REPLACE INTO catalogue_products (id, canonical_name, category, target_size, search_terms_json, search_text, updated_at) VALUES (${[
       sql(productId), sql(item.name), sql(item.category), sql(item.size), sql(JSON.stringify(terms)), sql(searchText), sql(now),
     ].join(", ")});`);
@@ -36,6 +39,7 @@ for (const region of source.regions) {
     ].join(", ")});`);
   }
 }
+statements.push(...vocabularySqlStatements(vocabulary));
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");

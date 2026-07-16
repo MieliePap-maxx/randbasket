@@ -54,12 +54,44 @@ npx wrangler secret put TURNSTILE_SECRET_KEY
 
 The public site key is included in the web client. The Worker validates every feedback token with Cloudflare Siteverify before saving or emailing the submission.
 
+## Semantic catalogue search
+
+RandBasket supplements keyword and typo-tolerant catalogue search with semantic candidate discovery. Product and query embeddings use Cloudflare Workers AI model `@cf/baai/bge-small-en-v1.5` with `cls` pooling. The model produces 384-dimensional vectors, stored in the `randbasket-products` Vectorize index with cosine similarity.
+
+Vector matches use an initial minimum cosine score of `0.78`. They only add candidate product IDs: D1 remains authoritative, and category, characteristic, quantity, unit, size, location and retailer-offer checks still reject unsafe matches. Exact and typo-tolerant keyword scores remain dominant in final ranking.
+
+Create the index and the private indexing token once:
+
+```powershell
+npx wrangler vectorize create randbasket-products --dimensions=384 --metric=cosine
+npx wrangler secret put VECTOR_INDEX_TOKEN
+```
+
+Apply the backward-compatible embedding status migration and deploy the bindings:
+
+```powershell
+npx wrangler d1 execute randbasket-catalogue --remote --file=migrations/0011-product-embedding-status.sql
+npx wrangler deploy
+```
+
+Set the local indexing token to the same value saved as the Worker secret, then index changed catalogue products. The script is idempotent and skips unchanged embedding text:
+
+```powershell
+$env:RANDBASKET_VECTOR_INDEX_TOKEN = "use-the-same-private-token"
+$env:RANDBASKET_API_URL = "https://api.randbasket.co.za"
+npm run vector:index
+npm run vector:verify
+```
+
+The content hash automatically re-indexes products after embedding-text, model or pooling changes. Use `npm run vector:index -- --force` only to repair or repopulate a recreated Vectorize index. Normal website deployments do not rebuild the vector index.
+
 ## API endpoints
 
 - `GET /v1/health`
 - `GET /v1/catalogue?q=full+cream+milk+2l&limit=10&page=1`
 - `GET /v1/catalogue/categories`
 - `POST /v1/catalogue/request` with `{ "query": "product name", "source": "mobile" }`
+- `POST /v1/admin/vector-index` with a private `Authorization: Bearer ...` header
 
 The older `/api/catalogue` route is also supported for the existing web client while it is migrated.
 

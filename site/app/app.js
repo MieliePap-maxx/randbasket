@@ -110,6 +110,23 @@ function clearCatalogueNotice() {
   setCatalogueNotice("");
 }
 
+function setCatalogueCorrectionNotice(originalQuery, correctedQuery) {
+  const status = $("#catalogueStatus");
+  if (state.catalogueNoticeTimer) {
+    window.clearTimeout(state.catalogueNoticeTimer);
+    state.catalogueNoticeTimer = null;
+  }
+  status.className = "catalogue-status catalogue-correction";
+  status.innerHTML = `
+    <span>Showing results for <strong>&ldquo;${escapeHtml(correctedQuery)}&rdquo;</strong></span>
+    <button type="button">Search instead for &ldquo;${escapeHtml(originalQuery)}&rdquo;</button>
+  `;
+  status.querySelector("button")?.addEventListener("click", () => {
+    $("#catalogueSearchInput").value = originalQuery;
+    searchCatalogue({ queryOverride: originalQuery, allowCorrection: false });
+  });
+}
+
 function getItemSearchHistory() {
   try {
     const history = JSON.parse(localStorage.getItem(ITEM_SEARCH_HISTORY_KEY) || "[]");
@@ -789,8 +806,9 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
   scheduleBasketScan(150);
 }
 
-async function searchCatalogue() {
-  const query = $("#catalogueSearchInput").value.trim();
+async function searchCatalogue(options = {}) {
+  const query = String(options.queryOverride ?? $("#catalogueSearchInput").value).trim();
+  const allowCorrection = options.allowCorrection !== false;
   if (!query) {
     setCatalogueNotice("Type a product to compare.");
     return;
@@ -804,16 +822,21 @@ async function searchCatalogue() {
   $("#catalogueLoading").hidden = false;
   setCatalogueNotice("Finding the closest retailer matches...");
   try {
-    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}${locationQuery()}`);
+    const correctionQuery = allowCorrection ? "" : "&correct=false";
+    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}${locationQuery()}${correctionQuery}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
     const matchedRetailers = new Set(state.catalogueRetailerMatches
       .flatMap((product) => product.stores || [])
       .filter((store) => store.price != null)
       .map((store) => store.storeId));
-    setCatalogueNotice(state.catalogueResults.length
-      ? `${state.catalogueResults.length} close matches across ${matchedRetailers.size} retailers`
-      : "No priced catalogue matches yet.");
+    if (payload.correctionApplied && payload.correctedQuery) {
+      setCatalogueCorrectionNotice(query, payload.correctedQuery);
+    } else {
+      setCatalogueNotice(state.catalogueResults.length
+        ? `${state.catalogueResults.length} close matches across ${matchedRetailers.size} retailers`
+        : "No priced catalogue matches yet.");
+    }
     renderItemSuggestions();
     renderCatalogueResults();
   } catch (error) {
@@ -1496,7 +1519,7 @@ function wireEvents() {
   $("#locationBtn").addEventListener("click", requestLocation);
   $("#locationAllowBtn").addEventListener("click", requestLocation);
   $("#locationDeclineBtn").addEventListener("click", declineLocation);
-  $("#catalogueSearchBtn").addEventListener("click", searchCatalogue);
+  $("#catalogueSearchBtn").addEventListener("click", () => searchCatalogue());
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchCatalogue();
   });
@@ -1588,6 +1611,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=33").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=34").catch(() => {});
   });
 }

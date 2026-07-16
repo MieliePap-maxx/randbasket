@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { addVocabularyText, vocabularySqlStatements } from "./search-vocabulary.mjs";
 
 const [profilesPath, outputDir, limitArg = "20", delayArg = "1200", offsetArg = "0"] = process.argv.slice(2);
 if (!profilesPath || !outputDir) {
@@ -115,10 +116,12 @@ await mkdir(outputDir, { recursive: true });
 const now = new Date().toISOString();
 const rows = [...products.values()];
 const files = [];
+const vocabulary = new Map();
 for (let start = 0, part = 1; start < rows.length; start += 250, part += 1) {
   const statements = [];
   for (const product of rows.slice(start, start + 250)) {
     const searchText = clean([product.title, product.brand, product.size, product.category, ...product.searchTerms].join(" "));
+    addVocabularyText(vocabulary, product.title, searchText, product.searchTerms, product.brand);
     statements.push(`INSERT OR REPLACE INTO catalogue_products (id, canonical_name, category, target_size, search_terms_json, search_text, updated_at) VALUES (${[
       sql(product.id), sql(product.title), sql(product.category), sql(product.size), sql(JSON.stringify(product.searchTerms)), sql(searchText), sql(now),
     ].join(", ")});`);
@@ -132,5 +135,16 @@ for (let start = 0, part = 1; start < rows.length; start += 250, part += 1) {
   await writeFile(join(outputDir, name), `${statements.join("\n")}\n`, "utf8");
   files.push(name);
 }
-await writeFile(join(outputDir, "manifest.json"), JSON.stringify({ generatedAt: now, termOffset, requestedTerms: terms.length, successfulTerms, products: rows.length, files }, null, 2));
+const vocabularyFile = "makro-vocabulary.sql";
+await writeFile(join(outputDir, vocabularyFile), `${vocabularySqlStatements(vocabulary).join("\n")}\n`, "utf8");
+files.push(vocabularyFile);
+await writeFile(join(outputDir, "manifest.json"), JSON.stringify({
+  generatedAt: now,
+  termOffset,
+  requestedTerms: terms.length,
+  successfulTerms,
+  products: rows.length,
+  vocabularyTerms: vocabulary.size,
+  files,
+}, null, 2));
 console.log(`Created ${files.length} D1 batches for ${rows.length} Makro products.`);

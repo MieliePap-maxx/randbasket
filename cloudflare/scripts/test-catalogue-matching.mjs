@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
+import { addVocabularyText, vocabularySqlStatements } from "./search-vocabulary.mjs";
 import {
+  MIN_SEMANTIC_SIMILARITY,
+  PRODUCT_EMBEDDING_DIMENSIONS,
+  PRODUCT_EMBEDDING_MODEL,
+  buildProductEmbeddingText,
   categoryFamily,
+  chooseVocabularyCorrection,
   compareCharacteristics,
+  findSemanticProductCandidates,
+  fuzzyQueryCoverage,
+  fuzzyTokenSimilarity,
+  inferredCategoryFamily,
+  levenshteinDistance,
   matchesSearchTerm,
+  mergeHybridCandidates,
   normalizeRetailerId,
   normaliseForTarget,
   parseMeasure,
+  scoreStore,
+  semanticCandidatePassesHardRules,
+  semanticScoreBonus,
   sizeCompatibility,
   sortClosestCandidates,
   stripRetailerAliases,
@@ -39,6 +54,9 @@ assert.equal(categoryFamily("Fresh Meat, Poultry & Seafood"), "meat");
 assert.equal(categoryFamily("Meat"), "meat");
 assert.equal(categoryFamily("Food Cupboard"), "pantry");
 assert.equal(categoryFamily("Frozen Food"), "frozen food");
+assert.equal(categoryFamily("Fresh Fruit & Vegetables"), "produce");
+assert.equal(inferredCategoryFamily("Makro Parmalat Full Cream Milk 6 x 1L"), "dairy");
+assert.equal(inferredCategoryFamily("Colgate Total Toothpaste 75ml"), "personal care");
 assert.equal(
   stripRetailerAliases("Pick n Pay Brown Bread 700g"),
   "brown bread 700 g",
@@ -46,6 +64,238 @@ assert.equal(
 assert.equal(normalizeRetailerId("pick-n-pay"), "pick-n-pay");
 assert.equal(normalizeRetailerId("Pick n Pay"), "pick-n-pay");
 assert.equal(normalizeRetailerId("WOOLWORTHS"), "woolworths");
+assert.equal(levenshteinDistance("cream", "creem"), 1);
+assert.equal(levenshteinDistance("avocado", "avocdo"), 1);
+assert.equal(levenshteinDistance("milk", "milk"), 0);
+assert.equal(fuzzyTokenSimilarity("creem", "cream"), 0.8);
+assert.equal(fuzzyTokenSimilarity("chiken", "chicken") > 0.85, true);
+assert.equal(fuzzyTokenSimilarity("avocdo", "avocado") > 0.85, true);
+assert.equal(fuzzyTokenSimilarity("yogert", "yogurt") > 0.83, true);
+assert.equal(fuzzyTokenSimilarity("minse", "mince"), 0.8);
+assert.equal(fuzzyTokenSimilarity("beef", "beer"), 0.75);
+assert.equal(fuzzyTokenSimilarity("ham", "jam"), 0);
+assert.equal(fuzzyTokenSimilarity("tea", "pea"), 0);
+assert.equal(fuzzyTokenSimilarity("1", "2"), 0);
+assert.equal(fuzzyTokenSimilarity("18", "6"), 0);
+assert.equal(fuzzyTokenSimilarity("kg", "g"), 0);
+assert.equal(fuzzyTokenSimilarity("ml", "l"), 0);
+assert.equal(fuzzyQueryCoverage("full cream milk", "SPAR full cream or low fat fresh milk") > 0.99, true);
+assert.equal(fuzzyQueryCoverage("full cream milk", "full cream plain yoghurt") < 0.75, true);
+assert.equal(fuzzyQueryCoverage("chiken fillets", "Fresh Chicken Breast Fillets") > 0.9, true);
+assert.equal(matchesSearchTerm("SPAR Full Cream or Low Fat Fresh Milk 2 L", "full cream milk"), true);
+assert.equal(matchesSearchTerm("Plain Double Cream Yogurt 1kg", "yoghurt"), true);
+assert.equal(matchesSearchTerm("Colgate Total Toothpase 75ml", "toothpaste"), true);
+assert.equal(matchesSearchTerm("Silk hair treatment", "milk"), false);
+
+const vocabulary = (terms) => terms.map(([term, usage_count = 1]) => ({ term, usage_count }));
+assert.equal(chooseVocabularyCorrection("avocdo", vocabulary([["avocado", 20]])), "avocado");
+assert.equal(chooseVocabularyCorrection("creem", vocabulary([["cream", 30]])), "cream");
+assert.equal(chooseVocabularyCorrection("chiken", vocabulary([["chicken", 50]])), "chicken");
+assert.equal(chooseVocabularyCorrection("yogert", vocabulary([["yogurt", 12], ["yoghurt", 40]])), "yogurt");
+assert.equal(chooseVocabularyCorrection("minse", vocabulary([["mince", 30]])), "mince");
+assert.equal(chooseVocabularyCorrection("ham", vocabulary([["jam", 100]])), "ham");
+assert.equal(chooseVocabularyCorrection("jam", vocabulary([["ham", 100]])), "jam");
+assert.equal(chooseVocabularyCorrection("tea", vocabulary([["pea", 100]])), "tea");
+assert.equal(chooseVocabularyCorrection("pea", vocabulary([["tea", 100]])), "pea");
+assert.equal(chooseVocabularyCorrection("beef", vocabulary([["beer", 100]])), "beef");
+assert.equal(chooseVocabularyCorrection("beer", vocabulary([["beef", 100]])), "beer");
+
+const generatedVocabulary = new Map();
+addVocabularyText(
+  generatedVocabulary,
+  "Clover Fresh Full Cream Milk 2L",
+  "clover fresh full cream milk dairy",
+  ["milk", "full cream milk"],
+  "Clover",
+);
+assert.equal(generatedVocabulary.has("clover"), true);
+assert.equal(generatedVocabulary.has("fresh"), true);
+assert.equal(generatedVocabulary.has("cream"), true);
+assert.equal(generatedVocabulary.has("milk"), true);
+assert.equal(generatedVocabulary.has("2"), false);
+assert.equal(generatedVocabulary.has("pack"), false);
+assert.equal(vocabularySqlStatements(generatedVocabulary).some((statement) =>
+  statement.includes("ON CONFLICT(term) DO UPDATE")), true);
+
+const milkProduct = {
+  id: "milk",
+  canonical_name: "Clover Fresh Full Cream Milk 2L",
+  category: "Dairy",
+  target_size: "2 L",
+  search_terms_json: "[]",
+  search_text: "clover fresh full cream milk 2 l dairy",
+};
+const embeddingText = buildProductEmbeddingText(milkProduct, {
+  brands: ["Douglasdale", "Clover", "Clover"],
+  retailerNames: [
+    "Fresh Full Cream Milk 2L",
+    "Clover Full Cream Fresh Milk 2L",
+  ],
+  profiles: [{
+    term: "full cream milk",
+    category: "Dairy",
+    search_text: "full cream fresh milk whole milk full fat milk",
+    exclude_terms_json: JSON.stringify(["low fat", "long life"]),
+    preferred_terms_json: JSON.stringify(["fresh milk", "whole milk"]),
+  }],
+});
+assert.equal(embeddingText, buildProductEmbeddingText(milkProduct, {
+  brands: ["Clover", "Douglasdale"],
+  retailerNames: [
+    "Clover Full Cream Fresh Milk 2L",
+    "Fresh Full Cream Milk 2L",
+  ],
+  profiles: [{
+    term: "full cream milk",
+    category: "Dairy",
+    search_text: "full cream fresh milk whole milk full fat milk",
+    exclude_terms_json: JSON.stringify(["low fat", "long life"]),
+    preferred_terms_json: JSON.stringify(["fresh milk", "whole milk"]),
+  }],
+}), "embedding text must be deterministic regardless of brand and retailer input order");
+assert.equal(embeddingText.includes("Product: clover fresh full cream milk 2 l"), true);
+assert.equal(embeddingText.includes("Aliases: fresh dairy milk, full cream milk, full fat milk, whole milk"), true);
+assert.equal(embeddingText.includes("R 34"), false, "prices must never be embedded");
+assert.equal(PRODUCT_EMBEDDING_MODEL, "@cf/baai/bge-small-en-v1.5");
+assert.equal(PRODUCT_EMBEDDING_DIMENSIONS, 384);
+assert.equal(MIN_SEMANTIC_SIMILARITY, 0.78);
+
+assert.deepEqual(mergeHybridCandidates(
+  [
+    { productId: "milk", lexicalScore: 8 },
+    { productId: "bread", lexicalScore: 5 },
+  ],
+  [
+    { productId: "milk", score: 0.88 },
+    { productId: "boerewors", score: 0.84 },
+    { productId: "below-threshold", score: 0.77 },
+  ],
+), [
+  {
+    productId: "milk",
+    lexicalScore: 8,
+    semanticScore: 0.88,
+    sources: ["keyword", "vector"],
+  },
+  {
+    productId: "bread",
+    lexicalScore: 5,
+    semanticScore: 0,
+    sources: ["keyword"],
+  },
+  {
+    productId: "boerewors",
+    lexicalScore: 0,
+    semanticScore: 0.84,
+    sources: ["vector"],
+  },
+]);
+assert.equal(semanticScoreBonus(0.77), 0);
+assert.equal(semanticScoreBonus(0.88) < 1, true, "semantic weighting must remain secondary");
+
+assert.equal(semanticCandidatePassesHardRules(
+  "whole milk",
+  milkProduct,
+  { productName: "Clover Fresh Full Cream Milk 2L", brand: "Clover", size: "2 L" },
+  [],
+), true);
+assert.equal(semanticCandidatePassesHardRules(
+  "whole milk",
+  { ...milkProduct, canonical_name: "Low Fat Fresh Milk", search_text: "low fat fresh milk dairy" },
+  { productName: "Low Fat Fresh Milk 2L", size: "2 L" },
+  [],
+), false, "whole milk must not admit low-fat milk through vector similarity");
+assert.equal(semanticCandidatePassesHardRules(
+  "beef mince 1kg",
+  { ...milkProduct, canonical_name: "Chicken Mince", category: "Meat", search_text: "chicken mince meat" },
+  { productName: "Chicken Mince 1kg", size: "1 kg" },
+  [],
+), false);
+assert.equal(semanticCandidatePassesHardRules(
+  "brown bread 700g",
+  { ...milkProduct, canonical_name: "White Bread", category: "Bakery", search_text: "white bread bakery" },
+  { productName: "White Bread 700g", size: "700 g" },
+  [],
+), false);
+assert.equal(semanticCandidatePassesHardRules(
+  "large eggs 18 pack",
+  { ...milkProduct, canonical_name: "Large Eggs 6 Pack", category: "Dairy", search_text: "large eggs dairy" },
+  { productName: "Large Eggs 6 Pack", size: "6 pack" },
+  [],
+), false, "semantic discovery must not substitute a different egg count");
+
+assert.equal(scoreStore(
+  "ful cream milk 2 l",
+  milkProduct,
+  { productName: "Clover Fresh Full Cream Milk 2L", brand: "Clover", size: "2 L" },
+  [],
+) > 0, true, "the corrected longer typo plus exact core words should still find full cream milk");
+
+const chickenProduct = {
+  id: "chicken-fillets",
+  canonical_name: "Fresh Chicken Breast Fillets 1kg",
+  category: "Meat",
+  target_size: "1 kg",
+  search_terms_json: "[]",
+  search_text: "fresh chicken breast fillets 1 kg meat",
+};
+assert.equal(scoreStore(
+  "chiken fillets 1 kg",
+  chickenProduct,
+  { productName: "Fresh Chicken Breast Fillets 1kg", size: "1 kg" },
+  [],
+) > 0, true, "fuzzy core-token coverage should tolerate chiken while preserving the 1kg measure");
+
+const embeddingVector = Array.from({ length: PRODUCT_EMBEDDING_DIMENSIONS }, () => 0.01);
+const semanticEnvironment = {
+  AI: {
+    run: async () => ({ data: [embeddingVector] }),
+  },
+  PRODUCT_VECTORS: {
+    query: async () => ({
+      matches: [
+        { id: "milk", score: 0.91 },
+        { id: "unsafe-low-score", score: 0.72 },
+      ],
+    }),
+  },
+};
+assert.deepEqual(
+  await findSemanticProductCandidates(semanticEnvironment, "whole milk"),
+  [{ productId: "milk", score: 0.91 }],
+);
+const originalWarn = console.warn;
+console.warn = () => {};
+assert.deepEqual(
+  await findSemanticProductCandidates({
+    ...semanticEnvironment,
+    AI: { run: async () => { throw new Error("Workers AI unavailable"); } },
+  }, "whole milk"),
+  [],
+  "Workers AI failure must fall back to lexical search",
+);
+assert.deepEqual(
+  await findSemanticProductCandidates({
+    ...semanticEnvironment,
+    PRODUCT_VECTORS: { query: async () => { throw new Error("Vectorize unavailable"); } },
+  }, "whole milk"),
+  [],
+  "Vectorize failure must fall back to lexical search",
+);
+console.warn = originalWarn;
+assert.deepEqual(
+  await findSemanticProductCandidates({
+    ...semanticEnvironment,
+    PRODUCT_VECTORS: { query: async () => ({ matches: [] }) },
+  }, "whole milk"),
+  [],
+  "an empty vector index must leave keyword search functional",
+);
+assert.deepEqual(
+  await findSemanticProductCandidates(semanticEnvironment, "https://www.pnp.co.za/product/123"),
+  [],
+  "product URL searches must not call semantic search",
+);
 
 measure("2L", { amount: 2000, kind: "volume" });
 measure("6 x 1L", { amount: 6000, kind: "volume" });

@@ -227,11 +227,17 @@
         const raw = String(store.storeId || store.id || store.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         return heroStoreAliases[raw] || raw;
       };
-      const isTwoLitreMatch = (product, store) => {
-        const size = String(store.size || product.targetSize || "").toLowerCase().replace(/\s+/g, "");
-        return size === "2l" || size === "2000ml";
+      const heroVolumeMl = (value) => {
+        const text = String(value || "").toLowerCase().replace(/[×]/g, "x");
+        const multipack = text.match(/\b(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(ml|l)\b/);
+        const single = text.match(/\b(\d+(?:\.\d+)?)\s*(ml|l)\b/);
+        const match = multipack || single;
+        if (!match) return null;
+        const amount = multipack ? Number(match[1]) * Number(match[2]) : Number(match[1]);
+        const unit = multipack ? match[3] : match[2];
+        return Number.isFinite(amount) && amount > 0 ? amount * (unit === "l" ? 1000 : 1) : null;
       };
-      fetch(`https://api.randbasket.co.za/v1/catalogue?q=${encodeURIComponent("full cream fresh milk 2l")}&limit=30&page=1`)
+      fetch(`https://api.randbasket.co.za/v1/catalogue?q=${encodeURIComponent("full cream milk 2l")}&limit=30&page=1&perRetailer=6`)
         .then((response) => {
           if (!response.ok) throw new Error("Price comparison unavailable");
           return response.json();
@@ -242,20 +248,29 @@
           products.flatMap((product) => (product.stores || []).map((store) => ({ product, store }))).forEach(({ product, store }) => {
             const storeId = normaliseHeroStore(store);
             const price = Number(store.price);
-            if (!heroStoreNames[storeId] || !isTwoLitreMatch(product, store) || !Number.isFinite(price) || price <= 0) return;
+            const offeredMl = heroVolumeMl(store.size || product.targetSize || store.productName);
+            if (!heroStoreNames[storeId] || !offeredMl || !Number.isFinite(price) || price <= 0) return;
+            const comparablePrice = Number((price * 2000 / offeredMl).toFixed(2));
+            const sizeDifference = Math.abs(Math.log(offeredMl / 2000));
             const current = lowestByStore.get(storeId);
-            if (!current || price < current.price) lowestByStore.set(storeId, { price, store });
+            if (!current
+              || sizeDifference < current.sizeDifference
+              || (Math.abs(sizeDifference - current.sizeDifference) < 0.001 && comparablePrice < current.comparablePrice)) {
+              lowestByStore.set(storeId, { price, comparablePrice, sizeDifference, store });
+            }
           });
           heroRows.forEach((row) => {
             const match = lowestByStore.get(row.dataset.heroStore);
-            row.querySelector("strong").textContent = match ? heroMoney.format(match.price) : "No current match";
+            row.querySelector("strong").textContent = match
+              ? `${heroMoney.format(match.comparablePrice)}${match.sizeDifference > 0.001 ? " / 2L" : ""}`
+              : row.dataset.heroStore === "spar" ? "Location needed" : "No current match";
             row.classList.toggle("unavailable", !match);
           });
-          const matches = [...lowestByStore.entries()].sort((left, right) => left[1].price - right[1].price);
+          const matches = [...lowestByStore.entries()].sort((left, right) => left[1].comparablePrice - right[1].comparablePrice);
           if (!matches.length) throw new Error("No comparable prices");
           const [bestStoreId, bestMatch] = matches[0];
           document.querySelector(`[data-hero-store="${bestStoreId}"]`)?.classList.add("best");
-          document.querySelector("#heroBestPrice").textContent = heroMoney.format(bestMatch.price).replace(/\s/g, "");
+          document.querySelector("#heroBestPrice").textContent = heroMoney.format(bestMatch.comparablePrice).replace(/\s/g, "");
           document.querySelector("#heroBestStore").textContent = heroStoreNames[bestStoreId];
           document.querySelector("#heroComparisonStatus").textContent = `Best listed match highlighted across ${matches.length} retailer${matches.length === 1 ? "" : "s"}.`;
         })

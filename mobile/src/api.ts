@@ -52,9 +52,13 @@ export type CatalogueProduct = {
 export type CatalogueResponse = {
   ok: boolean;
   query: string;
+  correctedQuery?: string;
+  correctionApplied?: boolean;
   page?: number;
   pageSize?: number;
   hasMore?: boolean;
+  semanticSearchApplied?: boolean;
+  semanticCandidateCount?: number;
   products: CatalogueProduct[];
   retailerMatches?: CatalogueProduct[];
 };

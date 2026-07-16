@@ -60,6 +60,27 @@ CREATE TABLE IF NOT EXISTS search_profiles (
   preferred_terms_json TEXT NOT NULL DEFAULT '[]'
 );
 
+CREATE TABLE IF NOT EXISTS search_vocabulary (
+  term TEXT PRIMARY KEY,
+  first_character TEXT NOT NULL,
+  term_length INTEGER NOT NULL,
+  usage_count INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_vocabulary_lookup
+  ON search_vocabulary(first_character, term_length);
+
+CREATE TABLE IF NOT EXISTS product_embedding_status (
+  product_id TEXT PRIMARY KEY,
+  embedding_hash TEXT NOT NULL,
+  embedding_model TEXT NOT NULL,
+  embedded_at TEXT NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES catalogue_products(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_embedding_status_model
+  ON product_embedding_status(embedding_model, embedded_at);
+
 CREATE TABLE IF NOT EXISTS search_requests (
   id TEXT PRIMARY KEY,
   query TEXT NOT NULL,

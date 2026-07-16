@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { addVocabularyText, vocabularySqlStatements } from "./search-vocabulary.mjs";
 
 const [profilesPath, outputDir, ...capturePaths] = process.argv.slice(2);
 if (!profilesPath || !outputDir || !capturePaths.length) {
@@ -81,10 +82,12 @@ await mkdir(outputDir, { recursive: true });
 const now = new Date().toISOString();
 const rows = [...products.values()];
 const files = [];
+const vocabulary = new Map();
 for (let start = 0, part = 1; start < rows.length; start += 250, part += 1) {
   const statements = [];
   for (const product of rows.slice(start, start + 250)) {
     const searchText = clean([product.title, product.size, product.category, ...product.searchTerms].join(" "));
+    addVocabularyText(vocabulary, product.title, searchText, product.searchTerms, product.brand);
     statements.push(`INSERT OR REPLACE INTO catalogue_products (id, canonical_name, category, target_size, search_terms_json, search_text, updated_at) VALUES (${[
       sql(product.id), sql(product.title), sql(product.category), sql(product.size), sql(JSON.stringify(product.searchTerms)), sql(searchText), sql(now),
     ].join(", ")});`);
@@ -98,11 +101,15 @@ for (let start = 0, part = 1; start < rows.length; start += 250, part += 1) {
   await writeFile(join(outputDir, name), `${statements.join("\n")}\n`, "utf8");
   files.push(name);
 }
+const vocabularyFile = "makro-browser-vocabulary.sql";
+await writeFile(join(outputDir, vocabularyFile), `${vocabularySqlStatements(vocabulary).join("\n")}\n`, "utf8");
+files.push(vocabularyFile);
 
 await writeFile(join(outputDir, "manifest.json"), JSON.stringify({
   generatedAt: now,
   captures: capturePaths.map((capturePath) => basename(capturePath)),
   products: rows.length,
+  vocabularyTerms: vocabulary.size,
   files,
 }, null, 2));
 console.log(`Created ${files.length} D1 batches for ${rows.length} reviewed Makro browser products.`);

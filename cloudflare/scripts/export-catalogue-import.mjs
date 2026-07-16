@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { addVocabularyText, vocabularySqlStatements } from "./search-vocabulary.mjs";
 
 const [cataloguePath, profilesPath, outputDirectory] = process.argv.slice(2);
 
@@ -41,18 +42,21 @@ await mkdir(output, { recursive: true });
 
 const now = new Date().toISOString();
 const files = [];
+const vocabulary = new Map();
 for (let start = 0, part = 1; start < catalogue.length; start += batchSize, part += 1) {
   const products = catalogue.slice(start, start + batchSize);
   const statements = ["PRAGMA foreign_keys = ON;"];
   for (const product of products) {
     const searchTerms = Array.isArray(product.searchTerms) ? product.searchTerms : [];
     const searchText = clean([product.canonicalName, product.targetSize, product.category, ...searchTerms].join(" "));
+    addVocabularyText(vocabulary, product.canonicalName, searchText, searchTerms);
     statements.push(
       `INSERT OR REPLACE INTO catalogue_products (id, canonical_name, category, target_size, search_terms_json, search_text, updated_at) VALUES (${[
         sql(product.id), sql(product.canonicalName), sql(product.category), sql(product.targetSize), sql(JSON.stringify(searchTerms)), sql(searchText), sql(now),
       ].join(", ")});`,
     );
     for (const [index, offer] of (product.stores || []).entries()) {
+      addVocabularyText(vocabulary, offer.productName, offer.brand);
       const id = `${product.id}:${offer.storeId || "unknown"}:${index}`;
       statements.push(
         `INSERT OR REPLACE INTO catalogue_offers (id, product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label, price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type, promo_applied, image_url, product_url, location_key, store_code, store_display_name, latitude, longitude, last_seen_at, updated_at) VALUES (${[
@@ -75,5 +79,13 @@ const profileStatements = profiles.map((profile) =>
   ].join(", ")});`,
 );
 await writeFile(join(output, "search-profiles.sql"), `${profileStatements.join("\n")}\n`, "utf8");
-await writeFile(join(output, "manifest.json"), JSON.stringify({ generatedAt: now, products: catalogue.length, batches: files, profiles: profiles.length }, null, 2), "utf8");
-console.log(`Created ${files.length} catalogue SQL batches and ${profiles.length} search profiles in ${output}`);
+await writeFile(join(output, "search-vocabulary.sql"), `${vocabularySqlStatements(vocabulary, { replace: true }).join("\n")}\n`, "utf8");
+await writeFile(join(output, "manifest.json"), JSON.stringify({
+  generatedAt: now,
+  products: catalogue.length,
+  batches: files,
+  profiles: profiles.length,
+  vocabularyTerms: vocabulary.size,
+  vocabularyFile: "search-vocabulary.sql",
+}, null, 2), "utf8");
+console.log(`Created ${files.length} catalogue SQL batches, ${profiles.length} search profiles and ${vocabulary.size} vocabulary terms in ${output}`);
