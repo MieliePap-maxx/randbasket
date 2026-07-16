@@ -8,6 +8,7 @@ const state = {
   catalogueRetailerMatches: [],
   cataloguePage: 1,
   catalogueHasMore: false,
+  catalogueQuery: "",
   specials: [],
   specialsLoaded: false,
   autoScanTimer: null,
@@ -163,6 +164,16 @@ function cleanDisplayText(value) {
 }
 
 const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
+const retailerAliases = [
+  "pick n pay",
+  "pick and pay",
+  "pnp",
+  "checkers",
+  "woolworths",
+  "woolies",
+  "spar",
+  "makro",
+];
 
 const measurementUnits = {
   mg: { dimension: "mass", baseMultiplier: 0.001, comparisonAmount: 1000, comparisonUnit: "kg" },
@@ -228,6 +239,34 @@ function getUnitComparison(product, store) {
     ...measurement,
     unitPrice: (price * measurement.comparisonAmount) / measurement.baseAmount,
   };
+}
+
+function stripComparisonBranding(value, brand = "") {
+  let text = cleanDisplayText(value).toLowerCase();
+  [...retailerAliases, brand]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .forEach((term) => {
+      const escaped = String(term).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      text = text.replace(new RegExp(`\\b${escaped}\\b`, "gi"), " ");
+    });
+  return text
+    .replace(/[^a-z0-9.,]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function buildComparisonQuery(product, store, preferredQuery = "") {
+  const searchTerms = Array.isArray(product.searchTerms) ? [...product.searchTerms].filter(Boolean) : [];
+  const source = preferredQuery
+    || searchTerms.sort((left, right) => String(right).length - String(left).length)[0]
+    || product.canonicalName
+    || store.productName
+    || "product";
+  let query = stripComparisonBranding(source, store.brand);
+  const targetSize = cleanDisplayText(store.size || product.targetSize || "");
+  if (targetSize && !parseMeasurement(query)) query = `${query} ${targetSize}`.trim();
+  return query;
 }
 
 function updateSummary() {
@@ -380,12 +419,14 @@ function renderCatalogueResults() {
       </div>
       <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
     `;
-    article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store));
+    article.querySelector(".catalogue-add-btn").addEventListener("click", () => {
+      addCatalogueProductToBasket(product, store, state.catalogueQuery);
+    });
     wrap.appendChild(article);
   });
 }
 
-async function addCatalogueProductToBasket(product, store) {
+async function addCatalogueProductToBasket(product, store, preferredQuery = "") {
   const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
   const existing = state.items.find((item) => item.links?.[store.storeId] === store.url);
   if (existing) {
@@ -396,15 +437,21 @@ async function addCatalogueProductToBasket(product, store) {
     id: `${product.id}-${store.storeId}-${Date.now()}`,
     name: productName,
     query: productName,
+    comparisonQuery: buildComparisonQuery(product, store, preferredQuery),
     targetSize: store.size || product.targetSize || "",
     quantity: 1,
     category: product.category || "",
+    selectedProductId: product.id,
+    selectedProductName: productName,
+    selectedBrand: store.brand || "",
     selectedStoreId: store.storeId,
     selectedStoreName: store.storeName,
     selectedPrice: store.price,
     links: { [store.storeId]: store.url || "" },
   });
+  state.latest = null;
   renderItems();
+  renderResults();
   await saveAll();
   $("#catalogueStatus").textContent = `${productName} added to the basket.`;
   scheduleBasketScan(150);
@@ -417,6 +464,7 @@ async function searchCatalogue(page = 1) {
     return;
   }
   const button = $("#catalogueSearchBtn");
+  state.catalogueQuery = query;
   button.disabled = true;
   $("#catalogueLoading").hidden = false;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
@@ -487,7 +535,20 @@ function renderResults() {
   wrap.innerHTML = "";
   renderBasketTotals(state.latest);
   if (!state.latest) {
-    $("#emptyResults").hidden = false;
+    $("#emptyResults").hidden = state.items.length > 0;
+    if (state.items.length) {
+      wrap.innerHTML = state.items.map((item) => `
+        <article class="result-card">
+          <div class="result-head">
+            <div>
+              <h3>${escapeHtml(item.name)}</h3>
+              <div class="status">${escapeHtml(item.comparisonQuery || item.query || item.name)} - finding closest retailer matches...</div>
+            </div>
+            <span class="badge">Updating</span>
+          </div>
+        </article>
+      `).join("");
+    }
     return;
   }
   $("#emptyResults").hidden = true;
@@ -720,7 +781,7 @@ function renderSpecials() {
       canonicalName: special.canonicalName,
       category: special.category,
       targetSize: special.targetSize,
-    }, store));
+    }, store, special.canonicalName));
     wrap.appendChild(card);
   });
 }

@@ -66,9 +66,13 @@ type BasketItem = {
   id?: string;
   name?: string;
   query?: string;
+  comparisonQuery?: string;
   targetSize?: string;
   quantity?: number;
   category?: string;
+  selectedProductId?: string;
+  selectedProductName?: string;
+  selectedBrand?: string;
   links?: Record<string, string>;
 };
 
@@ -127,9 +131,11 @@ function tokens(text: string) {
   return [...new Set(clean(text).split(" ").filter((term) => term.length > 1))];
 }
 
-function measureFromQuery(text: string) {
-  const match = clean(text).match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
-  return match ? `${match[1]} ${match[2]}` : "";
+export function stripRetailerAliases(text: string) {
+  return clean(text)
+    .replace(/\b(?:pick n pay|pick and pay|pnp|checkers|woolworths|woolies|spar|makro)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function parseJsonArray(value: string) {
@@ -142,7 +148,7 @@ function parseJsonArray(value: string) {
 }
 
 function scoreProduct(query: string, product: ProductRow, profiles: SearchProfileRow[]) {
-  const normalizedQuery = clean(query);
+  const normalizedQuery = stripRetailerAliases(query);
   const searchText = product.search_text || "";
   const queryTokens = tokens(query);
   const hits = queryTokens.filter((term) => searchText.includes(term)).length;
@@ -174,7 +180,7 @@ function scoreProduct(query: string, product: ProductRow, profiles: SearchProfil
 }
 
 function scoreStore(query: string, product: ProductRow, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
-  const normalizedQuery = clean(query);
+  const normalizedQuery = stripRetailerAliases(query);
   const offerText = clean([store.productName, store.brand, store.size].join(" "));
   const profile = profiles
     .filter((entry) => normalizedQuery.includes(clean(entry.term)))
@@ -184,12 +190,16 @@ function scoreStore(query: string, product: ProductRow, store: { productName: st
   const coreHits = coreTokens.filter((term) => offerText.includes(term)).length;
   if (coreHits < Math.max(1, coreTokens.length - 1)) return -999;
 
-  const requestedMeasure = measureFromQuery(query);
-  const offeredMeasure = measureFromQuery(store.size || store.productName);
-  if (requestedMeasure && offeredMeasure && requestedMeasure !== offeredMeasure) return -999;
+  const requestedMeasure = parseMeasure(query);
+  const offeredMeasure = parseMeasure(store.size || store.productName);
+  if (requestedMeasure && offeredMeasure && requestedMeasure.kind !== offeredMeasure.kind) return -999;
 
   let score = scoreProduct(query, product, profiles) + coreHits * 3;
-  if (requestedMeasure && offeredMeasure === requestedMeasure) score += 5;
+  if (requestedMeasure && offeredMeasure) {
+    const ratio = offeredMeasure.amount / requestedMeasure.amount;
+    if (Math.abs(1 - ratio) < 0.01) score += 5;
+    else score += Math.max(0, 3 - Math.abs(Math.log(ratio)));
+  }
   if (profile) {
     for (const term of parseJsonArray(profile.exclude_terms_json)) {
       const excluded = clean(term);
@@ -204,11 +214,11 @@ function scoreStore(query: string, product: ProductRow, store: { productName: st
 }
 
 function isStoreEligible(query: string, productCategory: string | undefined, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
-  const normalizedQuery = clean(query);
-  const requestedMeasure = measureFromQuery(query);
-  const offeredMeasure = measureFromQuery(store.size || store.productName);
+  const normalizedQuery = stripRetailerAliases(query);
+  const requestedMeasure = parseMeasure(query);
+  const offeredMeasure = parseMeasure(store.size || store.productName);
   if (requestedMeasure && !offeredMeasure) return false;
-  if (requestedMeasure && offeredMeasure && requestedMeasure !== offeredMeasure) return false;
+  if (requestedMeasure && offeredMeasure && requestedMeasure.kind !== offeredMeasure.kind) return false;
   const profile = profiles
     .filter((entry) => normalizedQuery.includes(clean(entry.term)))
     .sort((a, b) => clean(b.term).length - clean(a.term).length)[0];
@@ -227,23 +237,30 @@ function centsToPrice(cents: number | null) {
   return cents == null ? null : Number((cents / 100).toFixed(2));
 }
 
-type Measure = { amount: number; kind: "mass" | "volume" };
+type Measure = { amount: number; kind: "mass" | "volume" | "count" };
 
-function parseMeasure(value: string | undefined) {
-  const text = String(value || "").toLowerCase();
+export function parseMeasure(value: string | undefined) {
+  const text = String(value || "").toLowerCase().replace(/[']/g, "");
   const multipack = text.match(/\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
   const match = multipack || text.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
-  if (!match) return null;
-  const amount = multipack ? Number(match[1]) * Number(match[2]) : Number(match[1]);
-  const unit = multipack ? match[3] : match[2];
-  if (!Number.isFinite(amount) || amount <= 0) return null;
-  if (unit === "kg") return { amount: amount * 1000, kind: "mass" } satisfies Measure;
-  if (unit === "g") return { amount, kind: "mass" } satisfies Measure;
-  if (unit === "l") return { amount: amount * 1000, kind: "volume" } satisfies Measure;
-  return { amount, kind: "volume" } satisfies Measure;
+  if (match) {
+    const amount = multipack ? Number(match[1]) * Number(match[2]) : Number(match[1]);
+    const unit = multipack ? match[3] : match[2];
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (unit === "kg") return { amount: amount * 1000, kind: "mass" } satisfies Measure;
+    if (unit === "g") return { amount, kind: "mass" } satisfies Measure;
+    if (unit === "l") return { amount: amount * 1000, kind: "volume" } satisfies Measure;
+    return { amount, kind: "volume" } satisfies Measure;
+  }
+  const perUnit = text.match(/\bper\s+(kg|g|ml|l)\b/);
+  if (perUnit) return parseMeasure(`1 ${perUnit[1]}`);
+  const count = text.match(/\b(\d+(?:\.\d+)?)[\s-]*(?:pack|pk|count|ct|pieces?|units?|eggs?|s)\b/);
+  if (count && Number(count[1]) > 0) return { amount: Number(count[1]), kind: "count" };
+  if (/\bdozen\b/.test(text)) return { amount: 12, kind: "count" };
+  return null;
 }
 
-function normaliseForTarget(price: number | null, offeredSize: string | undefined, targetSize: string | undefined) {
+export function normaliseForTarget(price: number | null, offeredSize: string | undefined, targetSize: string | undefined) {
   if (price == null) return null;
   const offered = parseMeasure(offeredSize);
   const target = parseMeasure(targetSize);
@@ -309,7 +326,7 @@ function offerToStore(offer: OfferRow, location?: ShopperLocation) {
 function comparableStoreValue(query: string, product: { targetSize?: string }, store: ReturnType<typeof offerToStore>) {
   if (store.price == null) return Number.POSITIVE_INFINITY;
   const offered = parseMeasure(store.size || store.productName);
-  const requested = parseMeasure(measureFromQuery(query));
+  const requested = parseMeasure(query);
   if (requested && store.normalizedPrice != null) return store.normalizedPrice;
   if (offered && requested && offered.kind === requested.kind) {
     return store.price * requested.amount / offered.amount;
@@ -318,7 +335,202 @@ function comparableStoreValue(query: string, product: { targetSize?: string }, s
   return store.price;
 }
 
+const characteristicGroups = [
+  { terms: ["full cream", "low fat", "fat free", "skim", "medium fat"], required: true },
+  { terms: ["fresh", "long life", "uht", "powdered", "powder"], requiredContexts: ["milk"] },
+  { terms: ["plain", "chocolate", "strawberry", "vanilla", "flavoured", "flavored"], required: true },
+  { terms: ["white", "brown", "whole wheat", "wholewheat"], required: true },
+  { terms: ["beef", "chicken", "pork", "lamb", "turkey", "venison"], required: true },
+  { terms: ["self raising", "cake flour", "bread flour", "whole wheat flour"], required: true },
+];
+
+function includesPhrase(text: string, phrase: string) {
+  return ` ${clean(text)} `.includes(` ${clean(phrase)} `);
+}
+
+function eggSize(text: string) {
+  const normalized = clean(text);
+  if (!/\beggs?\b/.test(normalized)) return "";
+  return ["extra large", "jumbo", "large", "medium", "small"]
+    .find((size) => includesPhrase(normalized, size)) || "";
+}
+
+export function compareCharacteristics(referenceText: string, offerText: string) {
+  const requestedEggSize = eggSize(referenceText);
+  if (requestedEggSize && eggSize(offerText) !== requestedEggSize) {
+    return { valid: false, matches: 0 };
+  }
+  let matches = 0;
+  for (const group of characteristicGroups) {
+    const requested = group.terms.filter((term) => includesPhrase(referenceText, term));
+    if (!requested.length) continue;
+    const offered = group.terms.filter((term) => includesPhrase(offerText, term));
+    const requiresExplicitMatch = group.required
+      || group.requiredContexts?.some((term) => includesPhrase(referenceText, term));
+    if (!offered.length && requiresExplicitMatch) return { valid: false, matches };
+    if (offered.length && !offered.some((term) => requested.includes(term))) {
+      return { valid: false, matches };
+    }
+    if (offered.some((term) => requested.includes(term))) matches += 1;
+  }
+  return { valid: true, matches };
+}
+
+export function sizeCompatibility(targetText: string, offerText: string) {
+  const target = parseMeasure(targetText);
+  const offered = parseMeasure(offerText);
+  if (!target) return { valid: true, score: 0, difference: 0 };
+  if (!offered || target.kind !== offered.kind) {
+    return { valid: false, score: Number.NEGATIVE_INFINITY, difference: Number.POSITIVE_INFINITY };
+  }
+  const difference = Math.abs(Math.log(offered.amount / target.amount));
+  return {
+    valid: true,
+    score: Math.abs(offered.amount - target.amount) < 0.01 ? 30 : Math.max(0, 22 - difference * 10),
+    difference,
+  };
+}
+
+function matchingProfile(query: string, referenceText: string, profiles: SearchProfileRow[]) {
+  const combined = `${stripRetailerAliases(query)} ${stripRetailerAliases(referenceText)}`;
+  return profiles
+    .filter((profile) => includesPhrase(combined, profile.term))
+    .sort((left, right) => clean(right.term).length - clean(left.term).length)[0];
+}
+
+function withoutBrand(text: string, brand: string | undefined) {
+  const normalized = stripRetailerAliases(text);
+  const normalizedBrand = clean(brand);
+  if (!normalizedBrand) return normalized;
+  return ` ${normalized} `.replace(` ${normalizedBrand} `, " ").replace(/\s+/g, " ").trim();
+}
+
+function importantDescriptorTokens(referenceText: string, profile?: SearchProfileRow) {
+  const generic = new Set([
+    ...tokens(profile?.term || ""),
+    "pack",
+    "each",
+    "freshly",
+  ]);
+  return tokens(referenceText).filter((term) =>
+    !generic.has(term)
+    && !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
+    && !/^\d+(?:\.\d+)?$/.test(term));
+}
+
+type RankedComparisonCandidate = {
+  matchScore: number;
+  sizeDifference: number;
+  distance: number;
+  price: number;
+};
+
+type ClosestBasketMatch = RankedComparisonCandidate & {
+  product: ProductRow;
+  store: ReturnType<typeof offerToStore>;
+};
+
+export function sortClosestCandidates<T extends RankedComparisonCandidate>(candidates: T[]) {
+  return [...candidates].sort((left, right) =>
+    right.matchScore - left.matchScore
+    || left.sizeDifference - right.sizeDifference
+    || left.distance - right.distance
+    || left.price - right.price);
+}
+
+async function findClosestBasketMatches(
+  env: Env,
+  item: BasketItem,
+  enabledRetailers: typeof retailers,
+  profiles: SearchProfileRow[],
+  location?: ShopperLocation,
+) {
+  const comparisonQuery = stripRetailerAliases(String(item.comparisonQuery || item.query || item.name || ""));
+  const referenceText = withoutBrand(String(item.selectedProductName || item.name || comparisonQuery), item.selectedBrand);
+  const profile = matchingProfile(comparisonQuery, referenceText, profiles);
+  const targetCategory = clean(item.category || profile?.category || "");
+  const profileTerms = tokens(profile?.term || "");
+  const queryTerms = tokens(comparisonQuery).filter((term) =>
+    !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
+    && !/^\d+(?:\.\d+)?$/.test(term));
+  const discoveryTerms = profileTerms.length ? profileTerms : queryTerms;
+  if (!discoveryTerms.length) return new Map<string, {
+    product: ProductRow;
+    store: ReturnType<typeof offerToStore>;
+    matchScore: number;
+  }>();
+
+  const descriptorTokens = importantDescriptorTokens(referenceText, profile);
+  const statements = enabledRetailers.map((retailer) => {
+    const searchClauses = discoveryTerms
+      .map(() => "(p.search_text LIKE ? OR LOWER(o.product_name) LIKE ?)")
+      .join(" OR ");
+    const rankTerms = [...new Set([...queryTerms, ...descriptorTokens])].slice(0, 12);
+    const rankExpression = rankTerms.length
+      ? rankTerms
+        .map(() => "(CASE WHEN p.search_text LIKE ? OR LOWER(o.product_name) LIKE ? THEN 1 ELSE 0 END)")
+        .join(" + ")
+      : "0";
+    const bindings: unknown[] = [retailer.id];
+    for (const term of discoveryTerms) bindings.push(`%${term}%`, `%${term}%`);
+    for (const term of rankTerms) bindings.push(`%${term}%`, `%${term}%`);
+    return env.DB.prepare(
+      `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text,
+              o.product_id, o.retailer_id, o.retailer_name, o.product_name, o.brand, o.size_label,
+              o.unit_label, o.price_cents, o.regular_price_cents, o.normalized_price_cents,
+              o.promo_text, o.promo_type, o.promo_applied, o.image_url, o.product_url,
+              o.location_key, o.store_code, o.store_display_name, o.latitude, o.longitude, o.last_seen_at
+       FROM catalogue_products p
+       JOIN catalogue_offers o ON o.product_id = p.id
+       WHERE o.retailer_id = ? AND (${searchClauses})
+       ORDER BY ${rankExpression} DESC, o.last_seen_at DESC
+       LIMIT 700`,
+    ).bind(...bindings).all<ProductRow & OfferRow>();
+  });
+  const retailerResults = await Promise.all(statements);
+  const matches = new Map<string, ClosestBasketMatch>();
+
+  enabledRetailers.forEach((retailer, retailerIndex) => {
+    const ranked = retailerResults[retailerIndex].results
+      .filter((row) => isOfferVisibleAtLocation(row, location))
+      .map((row) => {
+        const store = offerToStore(row, location);
+        if (targetCategory && row.category && clean(row.category) !== targetCategory) return null;
+        if (store.price == null || !isStoreEligible(comparisonQuery, row.category || undefined, store, profiles)) return null;
+        const offerText = clean([store.productName, store.brand, store.size, row.canonical_name, row.search_text].join(" "));
+        const characteristics = compareCharacteristics(`${comparisonQuery} ${referenceText}`, offerText);
+        if (!characteristics.valid) return null;
+        const size = sizeCompatibility(String(item.targetSize || comparisonQuery), store.size || store.productName);
+        if (!size.valid) return null;
+        const baseScore = scoreStore(comparisonQuery, row, store, profiles);
+        if (baseScore <= 0) return null;
+        const descriptorHits = descriptorTokens.filter((term) => offerText.includes(term)).length;
+        const categoryScore = !targetCategory || clean(row.category) === targetCategory ? 100 : 0;
+        const selectedProductBonus = item.selectedProductId === row.id ? 20 : 0;
+        const matchScore = categoryScore
+          + baseScore * 5
+          + characteristics.matches * 20
+          + descriptorHits * 5
+          + size.score
+          + selectedProductBonus;
+        return {
+          product: row,
+          store,
+          matchScore,
+          sizeDifference: size.difference,
+          distance: store.distanceKm ?? Number.POSITIVE_INFINITY,
+          price: store.price,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) as ClosestBasketMatch[];
+    const closest = sortClosestCandidates(ranked)[0];
+    if (closest) matches.set(retailer.id, closest);
+  });
+  return matches;
+}
+
 async function findCatalogue(env: Env, query: string, page: number, pageSize: number, location?: ShopperLocation) {
+  query = stripRetailerAliases(query);
   const queryTokens = tokens(query);
   if (!queryTokens.length) return { products: [], retailerMatches: [], hasMore: false };
 
@@ -352,13 +564,15 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
     for (const product of retailerResult.results) strictById.set(product.id, product);
   }
   let results = [...strictById.values()];
-  if (!results.length && queryTokens.length > 1) {
-    const broadClauses = queryTokens.map(() => "search_text LIKE ?").join(" OR ");
+  if (queryTokens.length > 1) {
+    const broadTerms = coreTokens.length ? coreTokens : queryTokens;
+    const broadClauses = broadTerms.map(() => "search_text LIKE ?").join(" OR ");
     const broad = await env.DB.prepare(
       `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
        FROM catalogue_products WHERE ${broadClauses} LIMIT 350`,
-    ).bind(...queryTokens.map((term) => `%${term}%`)).all<ProductRow>();
-    results = broad.results;
+    ).bind(...broadTerms.map((term) => `%${term}%`)).all<ProductRow>();
+    for (const product of broad.results) strictById.set(product.id, product);
+    results = [...strictById.values()];
   }
   const scored = results
     .map((product) => ({ product, score: scoreProduct(query, product, profiles) }))
@@ -408,13 +622,20 @@ async function findCatalogue(env: Env, query: string, page: number, pageSize: nu
         .map((store) => ({
           product,
           store,
-          matchScore: product.score,
+          matchScore: scoreStore(query, {
+            id: product.id,
+            canonical_name: product.canonicalName,
+            category: product.category || null,
+            target_size: product.targetSize || null,
+            search_terms_json: JSON.stringify(product.searchTerms || []),
+            search_text: clean([product.canonicalName, product.category, product.targetSize, ...(product.searchTerms || [])].join(" ")),
+          }, store, profiles),
           comparableValue: comparableStoreValue(query, product, store),
         }))))
     .filter((entry) => entry.matchScore > 0)
-    .sort((left, right) => left.comparableValue - right.comparableValue
-      || right.matchScore - left.matchScore
+    .sort((left, right) => right.matchScore - left.matchScore
       || right.product.score - left.product.score
+      || left.comparableValue - right.comparableValue
       || left.store.productName.localeCompare(right.store.productName));
   const seenMatches = new Set<string>();
   const valueRankedMatches = rankedMatches
@@ -535,7 +756,8 @@ async function specialsResponse(request: Request, env: Env, url: URL) {
 }
 
 async function queueRequest(request: Request, env: Env) {
-  const body = await request.json<{ query?: string; source?: string }>().catch(() => ({}));
+  const body = await request.json<{ query?: string; source?: string }>()
+    .catch(() => ({} as { query?: string; source?: string }));
   const query = String(body.query || "").trim();
   if (!query) return json(request, env, { ok: false, error: "Missing catalogue request query." }, 400);
   const now = new Date().toISOString();
@@ -556,7 +778,15 @@ async function submitFeedback(request: Request, env: Env) {
     page?: string;
     honeypot?: string;
     turnstileToken?: string;
-  }>().catch(() => ({}));
+  }>().catch(() => ({} as {
+    name?: string;
+    email?: string;
+    feedbackType?: string;
+    message?: string;
+    page?: string;
+    honeypot?: string;
+    turnstileToken?: string;
+  }));
   if (String(body.honeypot || "").trim()) return json(request, env, { ok: true }, 202);
 
   const turnstileToken = String(body.turnstileToken || "").trim();
@@ -654,7 +884,7 @@ async function exactOffer(env: Env, retailerId: string, productUrl: string, loca
             latitude, longitude, last_seen_at
      FROM catalogue_offers WHERE retailer_id = ?1 AND product_url = ?2 LIMIT 25`,
   ).bind(retailerId, productUrl).all<OfferRow>();
-  return results.sort((left, right) => {
+  return results.filter((offer) => isOfferVisibleAtLocation(offer, location)).sort((left, right) => {
     const leftDistance = distanceKm(location, left.latitude, left.longitude) ?? Number.POSITIVE_INFINITY;
     const rightDistance = distanceKm(location, right.latitude, right.longitude) ?? Number.POSITIVE_INFINITY;
     return leftDistance - rightDistance;
@@ -662,25 +892,41 @@ async function exactOffer(env: Env, retailerId: string, productUrl: string, loca
 }
 
 async function scanBasket(request: Request, env: Env) {
-  const body = await request.json<{ items?: BasketItem[]; settings?: BasketSettings }>().catch(() => ({}));
+  const body = await request.json<{ items?: BasketItem[]; settings?: BasketSettings }>()
+    .catch(() => ({} as { items?: BasketItem[]; settings?: BasketSettings }));
   const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
   if (!items.length) return json(request, env, { ok: false, error: "Add at least one item before checking prices." }, 400);
   const enabledRetailers = retailers.filter((retailer) => body.settings?.stores?.[retailer.id] !== false);
   const location = validLocation(body.settings?.location);
+  const { results: profiles } = await env.DB.prepare(
+    "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
+  ).all<SearchProfileRow>();
   const scans = [];
 
   for (const item of items) {
-    const query = String(item.query || item.name || "").trim();
+    const query = withoutBrand(
+      String(item.comparisonQuery || item.query || item.name || "").trim(),
+      item.selectedBrand,
+    );
     const quantity = Math.max(0.01, Number(item.quantity || 1));
-    const lookup = query ? await findCatalogue(env, query, 1, 10, location) : { retailerMatches: [] as Array<{ stores: ReturnType<typeof offerToStore>[] }> };
+    const closestMatches = query
+      ? await findClosestBasketMatches(env, item, enabledRetailers, profiles, location)
+      : new Map<string, {
+        product: ProductRow;
+        store: ReturnType<typeof offerToStore>;
+        matchScore: number;
+      }>();
     const results = [];
     for (const retailer of enabledRetailers) {
       const linkedOffer = await exactOffer(env, retailer.id, String(item.links?.[retailer.id] || ""), location);
-      const fallback = lookup.retailerMatches
-        .find((product) => product.stores[0]?.storeId === retailer.id)?.stores[0];
-      const store = linkedOffer ? offerToStore(linkedOffer, location) : fallback;
+      const closest = closestMatches.get(retailer.id);
+      const store = linkedOffer ? offerToStore(linkedOffer, location) : closest?.store;
       const effectivePrice = store?.price ?? null;
-      const normalizedPrice = normaliseForTarget(effectivePrice, store?.size, item.targetSize);
+      const normalizedPrice = normaliseForTarget(
+        effectivePrice,
+        store?.size || store?.productName,
+        item.targetSize || query,
+      );
       results.push({
         storeId: retailer.id,
         storeName: retailer.name,
@@ -692,13 +938,18 @@ async function scanBasket(request: Request, env: Env) {
         lineTotal: normalizedPrice == null ? null : Number((normalizedPrice * quantity).toFixed(2)),
         productName: store?.productName || null,
         productUrl: store?.url || null,
+        productMeasure: store?.size ? { label: store.size } : null,
+        matchedProductId: linkedOffer?.product_id || closest?.product.id || null,
+        matchScore: linkedOffer ? null : closest?.matchScore ?? null,
         regularPrice: store?.regularPrice ?? null,
         savings: store?.regularPrice && effectivePrice != null ? Number((store.regularPrice - effectivePrice).toFixed(2)) : null,
         promoText: store?.promoText,
         promoApplied: store?.promoApplied,
       });
     }
-    const priced = results.filter((result) => result.effectivePrice != null).sort((left, right) => left.effectivePrice - right.effectivePrice);
+    const priced = results
+      .filter((result) => result.normalizedPrice != null)
+      .sort((left, right) => (left.normalizedPrice ?? Number.POSITIVE_INFINITY) - (right.normalizedPrice ?? Number.POSITIVE_INFINITY));
     scans.push({
       itemId: String(item.id || crypto.randomUUID()),
       name: String(item.name || query),
@@ -710,7 +961,7 @@ async function scanBasket(request: Request, env: Env) {
       results,
       bestStoreId: priced[0]?.storeId || null,
       bestStoreName: priced[0]?.storeName || null,
-      bestEffectivePrice: priced[0]?.effectivePrice ?? null,
+      bestEffectivePrice: priced[0]?.normalizedPrice ?? null,
     });
   }
 
