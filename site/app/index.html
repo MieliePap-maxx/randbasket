@@ -14,7 +14,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
     <link rel="apple-touch-icon" href="/favicon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=19" />
+    <link rel="stylesheet" href="styles.css?v=15" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
     <meta property="og:title" content="Compare Grocery Prices Online | RandBasket" />
@@ -68,7 +68,7 @@
           <div class="actions">
             <a class="hero-cta" href="#compare">Start comparing</a>
             <button class="hero-secondary" id="saveBtn" type="button">Save basket</button>
-            <button class="hero-secondary" id="shareBtn" type="button" disabled>Share basket</button>
+            <button class="hero-secondary" id="shareBtn" type="button">Share basket</button>
           </div>
         </div>
         <div class="hero-proof" aria-label="RandBasket benefits">
@@ -89,9 +89,9 @@
         </div>
       </section>
 
-      <section id="weeklyStaples" class="empty-basket weekly-staples">
+      <section id="emptyBasket" class="empty-basket empty-basket-onboarding">
         <div class="empty-basket-mark"><span>R</span></div>
-        <div><p class="eyebrow">Weekly staples</p><h3>Quick access to everyday groceries.</h3><p>These shortcuts stay here while you build your basket, so the next common item is always one click away.</p><div class="starter-searches"><button type="button" data-starter="full cream milk 2l">Milk</button><button type="button" data-starter="white bread 700g">Bread</button><button type="button" data-starter="eggs 18 pack">Eggs</button><button type="button" data-starter="beef mince 1kg">Mince</button><button type="button" data-starter="chicken portions 1kg">Chicken</button><button type="button" data-starter="cake flour 2.5kg">Flour</button></div></div>
+        <div><p class="eyebrow">Your basket is ready</p><h3>Add your first weekly staple.</h3><p>Search for a product, compare the available pack sizes and add the match you want.</p><div class="starter-searches"><button type="button" data-starter="full cream milk 2l">Milk</button><button type="button" data-starter="white bread 700g">Bread</button><button type="button" data-starter="eggs 18 pack">Eggs</button><button type="button" data-starter="beef mince 1kg">Mince</button><button type="button" data-starter="chicken portions 1kg">Chicken</button></div></div>
       </section>
 
       <section class="catalogue-pane" id="compare" aria-label="Product price comparison">
@@ -100,16 +100,19 @@
             <h2>Compare a product</h2>
             <p class="catalogue-subhead">Compare different pack sizes fairly using prices per kg, litre, or item.</p>
           </div>
+          <button class="primary compact" id="catalogueSearchBtn" type="button">Search</button>
         </div>
         <div class="catalogue-search-row">
-          <input id="catalogueSearchInput" type="search" autocomplete="on" list="itemSuggestions" placeholder="Search Full Cream Milk 2L, bacon, toothpaste..." />
-          <datalist id="itemSuggestions"></datalist>
-          <button class="primary" id="catalogueSearchBtn" type="button">Search</button>
+          <input id="catalogueSearchInput" type="search" autocomplete="off" placeholder="Search Full Cream Milk 2L, bacon, toothpaste..." />
         </div>
         <div id="catalogueStatus" class="catalogue-status" aria-live="polite"></div>
         <div id="catalogueLoading" class="catalogue-loading" hidden aria-label="Loading product matches"><i></i><i></i><i></i></div>
-        <div id="catalogueRetailerTabs" class="catalogue-retailer-tabs" role="tablist" aria-label="Choose a retailer" hidden></div>
         <div id="catalogueResults" class="catalogue-results"></div>
+        <div id="cataloguePagination" class="catalogue-pagination" hidden>
+          <button class="ghost compact" id="cataloguePreviousBtn" type="button">Previous</button>
+          <span id="cataloguePageLabel">Page 1</span>
+          <button class="ghost compact" id="catalogueMoreBtn" type="button">More matches</button>
+        </div>
       </section>
 
       <section class="specials-pane" id="specials" aria-label="Current grocery catalogues and specials">
@@ -146,7 +149,7 @@
             <h2>Value Settings</h2>
           </div>
           <label>
-            Matches shown per grocer
+            Product matches per store
             <input id="maxResultsInput" type="number" min="1" max="12" step="1" />
           </label>
           <div class="location-setting">
@@ -154,7 +157,7 @@
             <button class="ghost compact" id="locationBtn" type="button">Use my location</button>
           </div>
           <fieldset>
-            <legend>Grocers to check</legend>
+            <legend>Stores to check</legend>
             <div id="storeToggles" class="store-toggles"></div>
           </fieldset>
           <div class="source-note" id="sourceNote"></div>
@@ -269,22 +272,13 @@
     <dialog id="basketDialog" class="basket-dialog" aria-labelledby="basketDialogTitle">
       <div class="basket-dialog-card">
         <button id="basketDialogClose" class="dialog-close" type="button" aria-label="Close">&times;</button>
-        <p class="eyebrow">Your baskets</p>
-        <h2 id="basketDialogTitle">Save this basket</h2>
-        <p class="basket-dialog-intro">Give it a name so you can load the same list again later.</p>
-        <div class="basket-save-row"><input id="basketNameInput" type="text" maxlength="50" placeholder="e.g. Weekly shop" /><button id="basketSaveNamedBtn" class="primary" type="button">Save</button></div>
+        <p class="eyebrow">Saved baskets</p><h2 id="basketDialogTitle">Name this basket.</h2>
+        <div class="basket-save-row"><input id="basketNameInput" type="text" maxlength="50" placeholder="Weekly shop" /><button id="basketSaveNamedBtn" class="primary" type="button">Save</button></div>
         <div id="savedBasketList" class="saved-basket-list"></div>
         <p id="basketDialogStatus" class="status" aria-live="polite"></p>
       </div>
     </dialog>
 
-    <dialog id="productFocusDialog" class="product-focus-dialog" aria-labelledby="productFocusTitle">
-      <div class="product-focus-card">
-        <button id="productFocusCloseBtn" class="dialog-close" type="button" aria-label="Close product details">&times;</button>
-        <div id="productFocusContent"></div>
-      </div>
-    </dialog>
-
-    <script src="app.js?v=31"></script>
+    <script src="app.js?v=26"></script>
   </body>
 </html>
