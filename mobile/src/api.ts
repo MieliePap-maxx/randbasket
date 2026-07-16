@@ -59,6 +59,26 @@ export type CatalogueResponse = {
   retailerMatches?: CatalogueProduct[];
 };
 
+export type SpecialOffer = {
+  id: string;
+  productId: string;
+  canonicalName: string;
+  category?: string;
+  targetSize?: string;
+  saving?: number | null;
+  discountPercent?: number | null;
+  store: CatalogueStoreMatch;
+};
+
+export type SpecialsResponse = {
+  ok: boolean;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  locationApplied?: boolean;
+  specials: SpecialOffer[];
+};
+
 export type CatalogueCategory = {
   name: string;
   count: number;

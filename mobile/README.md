@@ -1,6 +1,6 @@
-# SA Grocery Price Checker Mobile
+# RandBasket Mobile
 
-Native iPhone and Android app shell for the grocery price checker.
+Native iPhone and Android app for RandBasket.
 
 ## What this app does
 
@@ -55,10 +55,10 @@ Start Mobile App Tunnel.bat
 
 Tunnel mode is slower, but it avoids local Wi-Fi, firewall, and router discovery issues.
 
-If you later install Node.js globally, these commands also work:
+If you install Node.js globally, these commands also work:
 
 ```powershell
-cd "C:\Users\MieliePap\Documents\South Africa Grocery Price Checker\mobile"
+cd mobile
 npm install
 npm run start
 ```
@@ -104,7 +104,9 @@ After `npm install`, install and log into EAS CLI:
 npm install --global eas-cli
 eas login
 eas init
-eas build --platform all
+npm run build:preview
+npm run check
+npm run build:all
 ```
 
 Submit builds:
@@ -113,6 +115,19 @@ Submit builds:
 eas submit --platform ios
 eas submit --platform android
 ```
+
+Production identity:
+
+```text
+App name: RandBasket
+iOS bundle ID: za.co.randbasket.app
+Android package: za.co.randbasket.app
+Production API: https://api.randbasket.co.za
+```
+
+The first `eas init` links this source to an Expo project and writes an EAS project ID into the Expo configuration. Make sure the permanent RandBasket owner account or organisation owns that project.
+
+Store listing copy, privacy answers, review notes and the release checklist are in `mobile/store/`.
 
 ## Store checklist
 
@@ -125,12 +140,9 @@ eas submit --platform android
 - App review notes explaining that prices are read from public retailer product pages and may vary by area, availability, and promotions.
 - A demo mode or review-ready backend data so Apple/Google can test without your private PC being online.
 
-## App identity
+## Release safety
 
-Current internal name:
-
-```text
-SA Grocery Price Checker
-```
-
-Before public release, consider a more brandable name that does not look affiliated with Pick n Pay, Checkers, or Woolworths.
+- Never commit Apple credentials, Google service-account JSON, API secrets or signing files.
+- Build the exact commit that was tested.
+- Do not change `za.co.randbasket.app` after either store listing is created.
+- Increment the marketing version for user-visible releases. EAS automatically increments production build numbers with the current configuration.

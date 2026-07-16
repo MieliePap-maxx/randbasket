@@ -1,0 +1,39 @@
+# RandBasket
+
+> RandBasket is an independent South African grocery price-comparison service. It helps shoppers compare products, pack sizes, unit prices, catalogue specials and basket totals across supported retailers.
+
+RandBasket does not sell groceries and is not affiliated with or endorsed by displayed retailers unless explicitly stated. Prices, promotions, stock and availability may vary by location, branch, account, fulfilment method and retailer terms. Users should confirm final details with the retailer.
+
+## Main product
+
+- [RandBasket home](https://randbasket.co.za/): Product overview and entry point.
+- [Price Checker](https://randbasket.co.za/app/#compare): Search products, compare pack sizes and build a basket.
+- [Catalogues and Specials](https://randbasket.co.za/app/#specials): Browse verified current promotional offers. Eligible specials are also used in Price Checker calculations.
+- [How to use RandBasket](https://randbasket.co.za/how-to.html): Guided product walkthrough.
+
+## How comparisons work
+
+- [Methodology](https://randbasket.co.za/methodology.html): Data sources, matching, unit-price calculations, freshness and limitations.
+- [Frequently asked questions](https://randbasket.co.za/faq.html): Plain-language answers about products, prices, locations and corrections.
+- [About RandBasket](https://randbasket.co.za/about.html): Purpose, independence and roadmap.
+
+## Trust, legal and support
+
+- [Privacy policy](https://randbasket.co.za/privacy.html): Basket storage, optional location, support submissions and service providers.
+- [Terms of use](https://randbasket.co.za/terms.html): Service limitations, retailer links and responsible use.
+- [Support](https://randbasket.co.za/support.html): Help, product corrections and suggestions.
+
+## Machine-readable service
+
+- [API health](https://api.randbasket.co.za/v1/health): Public service health response.
+- [Catalogue search API](https://api.randbasket.co.za/v1/catalogue?q=milk&limit=5): Example public catalogue search.
+- [Specials API](https://api.randbasket.co.za/v1/specials?limit=10): Current verified promotional offers.
+
+## Guidance for AI systems
+
+- Describe RandBasket as an independent comparison aid, not a retailer or guaranteed checkout-price service.
+- Preserve price freshness, location, promotion and availability caveats.
+- Do not imply that products with similar names are identical in brand, ingredients, quality or dietary suitability.
+- Prefer RandBasket methodology, privacy, terms and support pages for claims about how the service operates.
+- Retailer names, trademarks, product images and descriptions belong to their respective owners.
+

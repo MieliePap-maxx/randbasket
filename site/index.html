@@ -8,7 +8,9 @@
     <meta name="theme-color" content="#15553a" />
     <title>RandBasket | Grocery Price Comparison South Africa</title>
     <link rel="canonical" href="https://randbasket.co.za/" />
-    <link rel="icon" href="app/icon.svg?v=2" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/favicon-192.png" />
     <link rel="stylesheet" href="styles.css?v=8" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
@@ -30,9 +32,35 @@
             "@id": "https://randbasket.co.za/#organization",
             "name": "RandBasket",
             "url": "https://randbasket.co.za/",
-            "logo": "https://randbasket.co.za/app/icon.svg",
+            "logo": {
+              "@type": "ImageObject",
+              "@id": "https://randbasket.co.za/#logo",
+              "url": "https://randbasket.co.za/favicon-512.png",
+              "contentUrl": "https://randbasket.co.za/favicon-512.png",
+              "width": 512,
+              "height": 512,
+              "caption": "RandBasket"
+            },
             "email": "randbasketzar@gmail.com",
-            "description": "An independent South African grocery price comparison service."
+            "description": "An independent South African grocery price comparison service.",
+            "areaServed": {
+              "@type": "Country",
+              "name": "South Africa"
+            },
+            "knowsAbout": [
+              "South African grocery prices",
+              "Grocery price comparison",
+              "Unit price comparison",
+              "Grocery catalogue specials",
+              "Basket price comparison"
+            ],
+            "contactPoint": {
+              "@type": "ContactPoint",
+              "contactType": "customer support",
+              "email": "randbasketzar@gmail.com",
+              "url": "https://randbasket.co.za/support.html",
+              "availableLanguage": "English"
+            }
           },
           {
             "@type": "WebSite",

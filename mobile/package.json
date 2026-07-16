@@ -1,6 +1,6 @@
 {
-  "name": "sa-grocery-price-checker-mobile",
-  "version": "0.1.0",
+  "name": "randbasket-mobile",
+  "version": "1.0.0",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -11,8 +11,12 @@
     "build:all": "eas build --platform all",
     "build:ios": "eas build --platform ios",
     "build:android": "eas build --platform android",
+    "build:preview": "eas build --profile preview --platform all",
     "submit:ios": "eas submit --platform ios",
-    "submit:android": "eas submit --platform android"
+    "submit:android": "eas submit --platform android",
+    "release:ios": "eas build --profile production --platform ios --auto-submit",
+    "release:android": "eas build --profile production --platform android --auto-submit",
+    "check": "tsc --noEmit && expo config --type public"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

@@ -5,6 +5,7 @@ import {
   Animated,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -27,12 +28,19 @@ import {
   ItemScan,
   requestJson,
   ScanEntry,
+  SpecialOffer,
+  SpecialsResponse,
   Settings,
   Store,
 } from "./src/api";
 import { money, niceDate } from "./src/format";
 
 const storageKey = "randbasket-device-state-v1";
+const legalLinks = {
+  privacy: "https://randbasket.co.za/privacy.html",
+  terms: "https://randbasket.co.za/terms.html",
+  support: "https://randbasket.co.za/support.html",
+};
 
 const blankLinks: Record<string, string> = {
   "pick-n-pay": "",
@@ -53,7 +61,7 @@ const defaultSettings: Settings = {
   },
 };
 
-type AppView = "basket" | "scanning" | "results";
+type AppView = "basket" | "specials" | "scanning" | "results";
 
 const scanSteps = [
   "Saving your basket",
@@ -105,6 +113,8 @@ export default function App() {
   const [lastRequestedQuery, setLastRequestedQuery] = useState("");
   const [catalogueLoading, setCatalogueLoading] = useState(false);
   const [status, setStatus] = useState("Loading your saved basket...");
+  const [specials, setSpecials] = useState<SpecialOffer[]>([]);
+  const [specialsLoading, setSpecialsLoading] = useState(false);
 
   const bestBasket = useMemo(() => {
     if (!latest?.bestBasketStoreId) return null;
@@ -116,6 +126,14 @@ export default function App() {
   }, [settings.stores, stores]);
 
   const scanWorkCount = Math.max(1, items.length * Math.max(1, enabledStoreCount));
+
+  async function openWebsite(url: string) {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Link unavailable", "Please visit randbasket.co.za for RandBasket support and policies.");
+    }
+  }
 
   useEffect(() => {
     Animated.timing(progressAnim, {
@@ -294,6 +312,19 @@ export default function App() {
     }
   }
 
+  async function loadSpecials() {
+    setSpecialsLoading(true);
+    try {
+      const payload = await requestJson<SpecialsResponse>(apiUrl, `/v1/specials?limit=30${locationQuery(settings)}`);
+      setSpecials(payload.specials || []);
+      setStatus(payload.specials?.length ? "Showing current verified catalogue specials." : "No verified specials are available yet.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not load specials");
+    } finally {
+      setSpecialsLoading(false);
+    }
+  }
+
   async function requestMissingCatalogueItem(queryOverride?: string, silent = false) {
     const query = (queryOverride || catalogueSearch).trim();
     if (!query) {
@@ -404,6 +435,15 @@ export default function App() {
             <View style={styles.tabRow}>
               <Pressable onPress={() => setView("basket")} style={[styles.tab, view === "basket" && styles.activeTab]}>
                 <Text style={[styles.tabText, view === "basket" && styles.activeTabText]}>Basket</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setView("specials");
+                  if (!specials.length) void loadSpecials();
+                }}
+                style={[styles.tab, view === "specials" && styles.activeTab]}
+              >
+                <Text style={[styles.tabText, view === "specials" && styles.activeTabText]}>Specials</Text>
               </Pressable>
               <Pressable
                 disabled={!latest}
@@ -557,6 +597,51 @@ export default function App() {
               </Pressable>
             </View>
           ) : null}
+
+          {view === "specials" ? (
+            <View style={styles.panel}>
+              <View style={styles.sectionHead}>
+                <View style={styles.flex}>
+                  <Text style={styles.sectionTitle}>Catalogues & Specials</Text>
+                  <Text style={styles.resultMeta}>Verified offers already count in Price Checker totals.</Text>
+                </View>
+                <Button disabled={specialsLoading} label={specialsLoading ? "Loading..." : "Refresh"} variant="quiet" onPress={loadSpecials} />
+              </View>
+              {specialsLoading && !specials.length ? <ActivityIndicator color="#17694c" /> : null}
+              {specials.map((special) => (
+                <SpecialCard
+                  key={special.id}
+                  special={special}
+                  onAdd={() => addCatalogueProduct({
+                    id: special.productId,
+                    canonicalName: special.canonicalName,
+                    category: special.category,
+                    targetSize: special.targetSize,
+                    stores: [special.store],
+                  })}
+                />
+              ))}
+              {!specialsLoading && !specials.length ? <Text style={styles.empty}>No verified specials are available yet.</Text> : null}
+            </View>
+          ) : null}
+
+          <View style={styles.footer}>
+            <Text style={styles.footerBrand}>RandBasket</Text>
+            <Text style={styles.footerNotice}>
+              Prices and availability can vary by location, retailer, stock and promotion. Confirm the final details with the retailer before buying.
+            </Text>
+            <View style={styles.footerLinks}>
+              <Pressable accessibilityRole="link" onPress={() => void openWebsite(legalLinks.privacy)}>
+                <Text style={styles.footerLink}>Privacy</Text>
+              </Pressable>
+              <Pressable accessibilityRole="link" onPress={() => void openWebsite(legalLinks.terms)}>
+                <Text style={styles.footerLink}>Terms</Text>
+              </Pressable>
+              <Pressable accessibilityRole="link" onPress={() => void openWebsite(legalLinks.support)}>
+                <Text style={styles.footerLink}>Support</Text>
+              </Pressable>
+            </View>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -639,6 +724,29 @@ function CatalogueResult({ product, onAdd }: { product: CatalogueProduct; onAdd:
         })}
       </View>
       <Button label="Add to basket" onPress={onAdd} />
+    </View>
+  );
+}
+
+function SpecialCard({ special, onAdd }: { special: SpecialOffer; onAdd: () => void }) {
+  const store = special.store;
+  return (
+    <View style={styles.catalogueItem}>
+      <View style={styles.productTop}>
+        {store.imageUrl ? <Image resizeMode="contain" source={{ uri: store.imageUrl }} style={styles.productImage} /> : null}
+        <View style={styles.flex}>
+          <Text style={styles.specialBadge}>{special.discountPercent ? `${special.discountPercent}% OFF` : "CATALOGUE SPECIAL"}</Text>
+          <Text style={styles.catalogueName}>{store.productName || special.canonicalName}</Text>
+          <Text style={styles.catalogueMeta}>{[store.storeName, store.size, special.category].filter(Boolean).join(" · ")}</Text>
+          {store.promoText ? <Text style={styles.specialText}>{store.promoText}</Text> : null}
+        </View>
+        <View style={styles.priceColumn}>
+          {store.regularPrice ? <Text style={styles.regularPrice}>{money(store.regularPrice)}</Text> : null}
+          <Text style={styles.retailerPrice}>{money(store.price)}</Text>
+          {special.saving ? <Text style={styles.savingText}>Save {money(special.saving)}</Text> : null}
+        </View>
+      </View>
+      <Button label="Add special to basket" onPress={onAdd} />
     </View>
   );
 }
@@ -1370,5 +1478,51 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "900",
     marginTop: 2,
+  },
+  specialBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#dfff78",
+    borderRadius: 999,
+    color: "#124536",
+    fontSize: 10,
+    fontWeight: "900",
+    marginBottom: 5,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  savingText: {
+    color: "#17694c",
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: 3,
+  },
+  footer: {
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 16,
+  },
+  footerBrand: {
+    color: "#124536",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  footerNotice: {
+    color: "#697168",
+    fontSize: 12,
+    lineHeight: 18,
+    maxWidth: 520,
+    textAlign: "center",
+  },
+  footerLinks: {
+    flexDirection: "row",
+    gap: 22,
+  },
+  footerLink: {
+    color: "#17694c",
+    fontSize: 13,
+    fontWeight: "900",
+    textDecorationLine: "underline",
   },
 });

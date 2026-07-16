@@ -5,12 +5,17 @@ This is the release checklist for SA Grocery Price Checker. The local PowerShell
 ## Decisions Made
 
 - [x] One native Expo app for iPhone and Android.
+- [x] Free-first launch: no consumer paywall or subscription while RandBasket builds traction.
+- [x] Keep full basket comparison and estimated savings free during the traction phase.
+- [x] Defer sponsored placements and ensure they never influence organic price rankings.
 - [x] Cloudflare manages the domain and DNS.
 - [x] Free-first production stack: Cloudflare Pages, Workers Free, D1 Free, and R2 Free.
 - [x] Expo EAS Free for early builds, internal testing, and low-volume updates.
 - [x] Pick n Pay, Checkers, and Woolworths are the initial retailers.
 - [x] Public brand and domain: RandBasket / `randbasket.co.za`.
 - [ ] Decide whether Apple developer enrolment is individual or organisation.
+
+Deferred monetisation options are documented in `docs/monetisation-roadmap.md`.
 
 ## Release Architecture
 

@@ -462,6 +462,70 @@ async function categoriesResponse(request: Request, env: Env) {
   return json(request, env, { ok: true, categories: results.map((row) => ({ name: row.category, count: row.count, products: [] })) });
 }
 
+async function specialsResponse(request: Request, env: Env, url: URL) {
+  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "24", 10) || 24));
+  const retailer = clean(url.searchParams.get("retailer") || "");
+  const category = String(url.searchParams.get("category") || "").trim().toLowerCase();
+  const location = validLocation({ latitude: url.searchParams.get("latitude"), longitude: url.searchParams.get("longitude") });
+  const clauses = ["o.promo_applied = 1", "o.price_cents IS NOT NULL", "o.price_cents > 0"];
+  const bindings: string[] = [];
+  if (retailer) {
+    clauses.push("o.retailer_id = ?");
+    bindings.push(retailer);
+  }
+  if (category) {
+    clauses.push("LOWER(p.category) = ?");
+    bindings.push(category);
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text,
+            o.product_id, o.retailer_id, o.retailer_name, o.product_name, o.brand, o.size_label,
+            o.unit_label, o.price_cents, o.regular_price_cents, o.normalized_price_cents,
+            o.promo_text, o.promo_type, o.promo_applied, o.image_url, o.product_url,
+            o.location_key, o.store_code, o.store_display_name, o.latitude, o.longitude, o.last_seen_at
+     FROM catalogue_offers o
+     JOIN catalogue_products p ON p.id = o.product_id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY
+       CASE WHEN o.regular_price_cents > o.price_cents
+         THEN CAST(o.regular_price_cents - o.price_cents AS REAL) / o.regular_price_cents
+         ELSE 0 END DESC,
+       o.last_seen_at DESC,
+       p.canonical_name
+     LIMIT 500`,
+  ).bind(...bindings).all<ProductRow & OfferRow>();
+  const visible = results.filter((offer) => isOfferVisibleAtLocation(offer, location));
+  const start = (page - 1) * pageSize;
+  const specials = visible.slice(start, start + pageSize).map((row) => {
+    const store = offerToStore(row, location);
+    const saving = store.regularPrice && store.price != null
+      ? Number((store.regularPrice - store.price).toFixed(2))
+      : null;
+    const discountPercent = store.regularPrice && saving && saving > 0
+      ? Math.round((saving / store.regularPrice) * 100)
+      : null;
+    return {
+      id: `${row.product_id}:${row.retailer_id}:${row.location_key || "national"}:${row.product_url}`,
+      productId: row.product_id,
+      canonicalName: row.canonical_name,
+      category: row.category || undefined,
+      targetSize: row.target_size || undefined,
+      saving,
+      discountPercent,
+      store,
+    };
+  });
+  return json(request, env, {
+    ok: true,
+    page,
+    pageSize,
+    hasMore: visible.length > start + pageSize,
+    locationApplied: Boolean(location),
+    specials,
+  });
+}
+
 async function queueRequest(request: Request, env: Env) {
   const body = await request.json<{ query?: string; source?: string }>().catch(() => ({}));
   const query = String(body.query || "").trim();
@@ -640,6 +704,7 @@ export default {
     }
     if (request.method === "GET" && ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)) return catalogueResponse(request, env, url);
     if (request.method === "GET" && ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(url.pathname)) return categoriesResponse(request, env);
+    if (request.method === "GET" && ["/v1/specials", "/api/specials"].includes(url.pathname)) return specialsResponse(request, env, url);
     if (request.method === "POST" && ["/v1/catalogue/request", "/api/catalogue/request"].includes(url.pathname)) return queueRequest(request, env);
     if (request.method === "POST" && ["/v1/feedback", "/api/feedback"].includes(url.pathname)) return submitFeedback(request, env);
     if (request.method === "POST" && ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)) return scanBasket(request, env);

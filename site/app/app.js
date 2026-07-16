@@ -8,6 +8,7 @@ const state = {
   catalogueRetailerMatches: [],
   cataloguePage: 1,
   catalogueHasMore: false,
+  specials: [],
 };
 
 const API_ORIGIN = "https://api.randbasket.co.za";
@@ -624,6 +625,65 @@ function addItem() {
   $("#catalogueStatus").textContent = "Search for a product, then select Add to basket.";
 }
 
+function renderSpecials() {
+  const wrap = $("#specialsGrid");
+  wrap.innerHTML = "";
+  if (!state.specials.length) {
+    wrap.innerHTML = `<div class="empty">No verified catalogue specials are available for this selection yet.</div>`;
+    return;
+  }
+  state.specials.forEach((special) => {
+    const store = special.store;
+    const card = document.createElement("article");
+    card.className = "special-card";
+    const productName = cleanDisplayText(store.productName || special.canonicalName) || "Special";
+    const image = store.imageUrl
+      ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />`
+      : `<div class="catalogue-image-placeholder">Catalogue offer</div>`;
+    card.innerHTML = `
+      <div class="special-card-image">${image}</div>
+      <div class="special-card-copy">
+        <span class="special-pill">${special.discountPercent ? `${special.discountPercent}% off` : "Catalogue special"}</span>
+        <strong>${escapeHtml(productName)}</strong>
+        <small>${escapeHtml([store.storeName, store.size, special.category].filter(Boolean).join(" · "))}</small>
+        ${store.promoText ? `<p>${escapeHtml(store.promoText)}</p>` : ""}
+      </div>
+      <div class="special-card-price">
+        ${store.regularPrice ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
+        <strong>${formatMoney(store.price)}</strong>
+        ${special.saving ? `<small>Save ${formatMoney(special.saving)}</small>` : ""}
+        <button type="button">Add to basket</button>
+      </div>
+    `;
+    card.querySelector("button").addEventListener("click", () => addCatalogueProductToBasket({
+      id: special.productId,
+      canonicalName: special.canonicalName,
+      category: special.category,
+      targetSize: special.targetSize,
+    }, store));
+    wrap.appendChild(card);
+  });
+}
+
+async function loadSpecials() {
+  const retailer = $("#specialsRetailer").value;
+  $("#specialsRefreshBtn").disabled = true;
+  $("#specialsStatus").textContent = "Loading current verified offers...";
+  try {
+    const retailerQuery = retailer ? `&retailer=${encodeURIComponent(retailer)}` : "";
+    const payload = await api(`/v1/specials?limit=30${retailerQuery}${locationQuery()}`);
+    state.specials = payload.specials || [];
+    $("#specialsStatus").textContent = state.specials.length
+      ? `${state.specials.length} verified offers. These prices are included in matching Price Checker results.`
+      : "No verified specials are available for this selection yet.";
+    renderSpecials();
+  } catch {
+    $("#specialsStatus").textContent = "Specials could not be loaded. Try again shortly.";
+  } finally {
+    $("#specialsRefreshBtn").disabled = false;
+  }
+}
+
 function getSavedBaskets() {
   try { return JSON.parse(localStorage.getItem(SAVED_BASKETS_KEY) || "[]"); } catch { return []; }
 }
@@ -790,6 +850,8 @@ function wireEvents() {
   });
   $("#cataloguePreviousBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage - 1));
   $("#catalogueMoreBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage + 1));
+  $("#specialsRefreshBtn").addEventListener("click", loadSpecials);
+  $("#specialsRetailer").addEventListener("change", loadSpecials);
   $("#itemsBody").addEventListener("click", (event) => {
     const removeId = event.target.dataset.remove;
     if (!removeId) return;
@@ -822,6 +884,7 @@ async function init() {
   renderResults();
   updateSummary();
   wireEvents();
+  void loadSpecials();
   if (window.location.hash === "#suggestions") {
     openFeedback();
   } else if (!state.settings.locationPermission) {

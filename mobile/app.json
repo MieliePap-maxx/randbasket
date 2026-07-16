@@ -2,28 +2,45 @@
   "expo": {
     "name": "RandBasket",
     "slug": "randbasket",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "randbasket",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4F2EB"
+    },
     "plugins": [
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "RandBasket uses your location to select nearby grocer prices and availability."
+          "locationWhenInUsePermission": "Allow RandBasket to use your approximate location while the app is open to show more relevant nearby retailer prices. RandBasket does not track you in the background."
         }
       ]
     ],
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.mieliepap.sagrocerypricechecker",
+      "supportsTablet": false,
+      "bundleIdentifier": "za.co.randbasket.app",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "RandBasket uses your location to select nearby grocer prices and availability."
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Allow RandBasket to use your approximate location while the app is open to show more relevant nearby retailer prices. RandBasket does not track you in the background."
       }
     },
     "android": {
-      "package": "com.mieliepap.sagrocerypricechecker"
+      "package": "za.co.randbasket.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F4F2EB"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     }
   }
 }

@@ -11,8 +11,9 @@
     <title>Compare Grocery Prices Online | RandBasket South Africa</title>
     <link rel="canonical" href="https://randbasket.co.za/app/" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="icon.svg?v=2" />
-    <link rel="icon" href="icon.svg?v=2" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/favicon-192.png" />
     <link rel="stylesheet" href="styles.css?v=12" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
@@ -46,13 +47,14 @@
       </a>
       <nav class="app-nav-links" aria-label="App navigation">
         <a class="active" href="#compare" aria-current="page">Price Checker</a>
+        <a href="#specials">Catalogues &amp; Specials</a>
         <a href="#basket">My basket</a>
         <a href="../how-to.html">How to use</a>
         <button id="feedbackOpenBtn" class="feedback-nav-btn" type="button">Suggestions</button>
       </nav>
       <button id="appMenuBtn" class="app-menu-btn" type="button" aria-expanded="false" aria-controls="appMobileMenu" aria-label="Open menu"><span></span><span></span><span></span></button>
       <nav id="appMobileMenu" class="app-mobile-menu" aria-label="Mobile app navigation" hidden>
-        <a href="#compare">Price Checker</a><a href="#basket">My basket</a><a href="../how-to.html">How to use</a><a href="../faq.html">FAQ</a><a href="../support.html">Support</a><button id="mobileFeedbackBtn" type="button">Suggestions</button>
+        <a href="#compare">Price Checker</a><a href="#specials">Catalogues &amp; Specials</a><a href="#basket">My basket</a><a href="../how-to.html">How to use</a><a href="../faq.html">FAQ</a><a href="../support.html">Support</a><button id="mobileFeedbackBtn" type="button">Suggestions</button>
       </nav>
     </header>
 
@@ -111,6 +113,31 @@
           <span id="cataloguePageLabel">Page 1</span>
           <button class="ghost compact" id="catalogueMoreBtn" type="button">More matches</button>
         </div>
+      </section>
+
+      <section class="specials-pane" id="specials" aria-label="Current grocery catalogues and specials">
+        <div class="pane-header">
+          <div>
+            <p class="eyebrow">Current catalogue offers</p>
+            <h2>Catalogues &amp; Specials</h2>
+            <p class="catalogue-subhead">Browse verified promotional prices. When a special matches your basket, Price Checker uses it automatically.</p>
+          </div>
+          <button class="primary compact" id="specialsRefreshBtn" type="button">Refresh specials</button>
+        </div>
+        <div class="specials-filters">
+          <label>Retailer
+            <select id="specialsRetailer">
+              <option value="">All retailers</option>
+              <option value="pick-n-pay">Pick n Pay</option>
+              <option value="checkers">Checkers</option>
+              <option value="woolworths">Woolworths</option>
+              <option value="spar">SPAR</option>
+              <option value="makro">Makro</option>
+            </select>
+          </label>
+          <p id="specialsStatus" class="catalogue-status" aria-live="polite">Loading verified specials...</p>
+        </div>
+        <div id="specialsGrid" class="specials-grid"></div>
       </section>
 
       <section class="workspace">
@@ -242,6 +269,6 @@
       </div>
     </dialog>
 
-    <script src="app.js?v=22"></script>
+    <script src="app.js?v=23"></script>
   </body>
 </html>
