@@ -839,7 +839,7 @@ async function specialsResponse(request: Request, env: Env, url: URL) {
             o.location_key, o.store_code, o.store_display_name, o.latitude, o.longitude, o.last_seen_at
      FROM catalogue_offers o
      JOIN catalogue_products p ON p.id = o.product_id
-     WHERE ${clauses.join(" AND ")}
+     WHERE ${whereClauses.join(" AND ")}
      ORDER BY
        CASE WHEN o.regular_price_cents > o.price_cents
          THEN CAST(o.regular_price_cents - o.price_cents AS REAL) / o.regular_price_cents
