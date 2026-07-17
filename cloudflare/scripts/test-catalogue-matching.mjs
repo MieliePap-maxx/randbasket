@@ -65,6 +65,10 @@ assert.equal(categoryFamily("Meat"), "meat");
 assert.equal(categoryFamily("Food Cupboard"), "pantry");
 assert.equal(categoryFamily("Frozen Food"), "frozen food");
 assert.equal(categoryFamily("Fresh Fruit & Vegetables"), "produce");
+assert.equal(categoryFamily("Breakfast Milk Long Life"), "dairy");
+assert.equal(categoryFamily("Perishables Eggs"), "dairy");
+assert.equal(categoryFamily("Main Meal Flour"), "pantry");
+assert.equal(categoryFamily("Perishables Frozen Poultry"), "meat");
 assert.equal(inferredCategoryFamily("Makro Parmalat Full Cream Milk 6 x 1L"), "dairy");
 assert.equal(inferredCategoryFamily("Colgate Total Toothpaste 75ml"), "personal care");
 assert.equal(
@@ -502,6 +506,11 @@ assert.equal(assessCatalogueMatch(
   { productName: "Milk Rolls 6 Pack", size: "6 pack", price: 29.99 },
 ).accepted, false, "plain milk search must reject milk rolls");
 assert.equal(assessCatalogueMatch(
+  "milk",
+  { ...genericMilkProduct, canonical_name: "SPAR Evaporated Milk", search_text: "spar evaporated milk" },
+  { productName: "SPAR Evaporated Milk 410g", size: "410 g", price: null },
+).accepted, false, "plain milk search must reject evaporated milk");
+assert.equal(assessCatalogueMatch(
   "eggs",
   { ...genericMilkProduct, canonical_name: "Pickled Quail Eggs", category: "Dairy", search_text: "pickled quail eggs" },
   { productName: "Pickled Quail Eggs 290g", size: "290 g", price: 109.99 },
@@ -516,6 +525,11 @@ assert.equal(assessCatalogueMatch(
   { ...genericMilkProduct, canonical_name: "Savoury Mince", category: "Prepared meals", search_text: "savoury mince with vegetables" },
   { productName: "Savoury Mince With Vegetables 400g", size: "400 g", price: 54.99 },
 ).accepted, false, "plain mince search must reject prepared mince dishes");
+assert.equal(assessCatalogueMatch(
+  "chicken",
+  { ...genericMilkProduct, canonical_name: "SPAR Chicken Livers", category: "Perishables Frozen Poultry", search_text: "spar chicken livers" },
+  { productName: "SPAR Chicken Livers 500g", size: "500 g", price: null },
+).accepted, false, "generic chicken search must reject offal");
 
 for (const [query, family, category] of intentCases) {
   const product = {
@@ -575,13 +589,37 @@ const balancedProducts = await findBalancedProductCandidates({
 ], { matchAll: true, limitPerRetailer: 24 });
 assert.equal(balancedCalls.length, 1, "balanced matching must use one D1 statement");
 assert.doesNotMatch(balancedCalls[0].sql, /UNION ALL/, "catalogue discovery must not repeat the wildcard scan per retailer");
-assert.match(balancedCalls[0].sql, /EXISTS/, "catalogue discovery should verify retailer offers through the indexed relationship");
+assert.match(balancedCalls[0].sql, /JOIN catalogue_offers/, "catalogue discovery should use the indexed product-offer relationship");
+assert.match(balancedCalls[0].sql, /ROW_NUMBER\(\) OVER/, "catalogue discovery should rank candidates per retailer");
+assert.match(balancedCalls[0].sql, /PARTITION BY retailer_id/, "candidate limits must be applied independently to every retailer");
+assert.match(balancedCalls[0].sql, /retailer_rank <= 24/, "each retailer should retain its bounded candidate allowance");
 assert.match(balancedCalls[0].sql, /LIMIT 160/, "candidate discovery must remain globally bounded");
 assert.deepEqual(balancedCalls[0].bindings, [
   "pick-n-pay", "checkers", "woolworths", "spar", "makro",
   "%full%", "%cream%", "%milk%",
 ]);
 assert.deepEqual(balancedProducts.map((product) => product.id), ["milk-a", "milk-b"]);
+
+await findBalancedProductCandidates({
+  DB: {
+    prepare(sql) {
+      const call = { sql, bindings: [] };
+      balancedCalls.push(call);
+      return {
+        bind(...bindings) {
+          call.bindings = bindings;
+          return { async all() { return { results: [] }; } };
+        },
+      };
+    },
+  },
+}, ["milk"], [
+  { id: "spar", name: "SPAR" },
+], { matchAll: true, limitPerRetailer: 30, preferredCategoryFamily: "dairy" });
+assert.match(balancedCalls[1].sql, /category_priority DESC/, "matching category rows should rank first within a retailer");
+assert.deepEqual(balancedCalls[1].bindings, [
+  "spar", "%milk%", "%dairy%", "%milk%", "%egg%", "%cream%", "%butter%", "%yogh%",
+]);
 
 const diagnostics = buildRetailerDiagnostics(
   [

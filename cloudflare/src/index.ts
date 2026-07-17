@@ -695,7 +695,7 @@ export function categoryFamily(value: string | undefined | null) {
   if (/\b(?:meat|poultry|seafood)\b/.test(category)) return "meat";
   if (/\b(?:dairy|milk|eggs?)\b/.test(category)) return "dairy";
   if (/\b(?:bakery|bread)\b/.test(category)) return "bakery";
-  if (/\b(?:pantry|food cupboard)\b/.test(category)) return "pantry";
+  if (/\b(?:pantry|food cupboard|flour|baking aids?|cereals?|pasta|rice|sugar|spices?|sauces?|condiments?|main meal)\b/.test(category)) return "pantry";
   if (/\b(?:fruit|vegetables?|produce)\b/.test(category)) return "produce";
   if (/\b(?:beverages?|drinks?)\b/.test(category)) return "beverages";
   if (/\b(?:frozen|freezer)\b/.test(category)) return "frozen food";
@@ -723,6 +723,23 @@ function resolvedCategoryFamily(category: string | undefined | null, text = "") 
   const family = categoryFamily(category);
   if (family && !["groceries", "grocery", "food", "all products", "uncategorized", "other"].includes(family)) return family;
   return inferredCategoryFamily(text) || family;
+}
+
+function categorySearchPatterns(family: string | undefined) {
+  const patterns: Record<string, string[]> = {
+    meat: ["%meat%", "%poultry%", "%seafood%"],
+    dairy: ["%dairy%", "%milk%", "%egg%", "%cream%", "%butter%", "%yogh%"],
+    bakery: ["%bakery%", "%bread%", "%roll%", "%bun%"],
+    pantry: ["%pantry%", "%food cupboard%", "%flour%", "%main meal%", "%cereal%", "%baking%"],
+    produce: ["%produce%", "%fruit%", "%vegetable%"],
+    beverages: ["%beverage%", "%drink%", "%juice%", "%coffee%", "%tea%"],
+    "frozen food": ["%frozen%", "%freezer%"],
+    household: ["%household%", "%cleaning%", "%laundry%"],
+    "personal care": ["%personal care%", "%health%", "%beauty%", "%toiletr%"],
+    baby: ["%baby%", "%infant%"],
+    pet: ["%pet%", "%dog%", "%cat%"],
+  };
+  return patterns[categoryFamily(family)] || [];
 }
 
 function isStoreEligible(query: string, productCategory: string | undefined, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
@@ -969,7 +986,7 @@ function flourType(text: string) {
 function chickenForm(text: string) {
   const normalized = clean(text);
   if (!/\bchicken\b/.test(normalized)) return "";
-  if (/\b(?:mala|offal|giblets?|livers?|necks?|heads?|feet)\b/.test(normalized)) return "offal";
+  if (/\b(?:mala|offal|giblets?|livers?|hearts?|gizzards?|necks?|heads?|feet|soup packs?)\b/.test(normalized)) return "offal";
   if (includesPhrase(normalized, "mixed portions") || includesPhrase(normalized, "chicken portions")) return "portions";
   if (/\b(?:breasts?|fillets?)\b/.test(normalized)) return "breast";
   const cutHits = ["drumstick", "thigh", "wing"]
@@ -1169,6 +1186,10 @@ function severeIncompatibility(intent: QueryIntent, offerText: string, offeredFa
     if (/\b(?:chocolate bars?|slabs?|sweets?|candy|biscuits?|cookies?|milk rolls?|dessert)\b/.test(offerText)) {
       return "Milk confectionery is not grocery milk";
     }
+    const specialisedMilk = ["condensed", "evaporated", "maas", "kefir", "kephir", "milk powder", "powdered milk"];
+    const unrequestedMilkType = specialisedMilk.find((term) =>
+      includesPhrase(offerText, term) && !includesPhrase(intent.normalizedQuery, term));
+    if (unrequestedMilkType) return `${unrequestedMilkType} is not plain grocery milk`;
   }
   if (intent.productFamily === "bread"
     && /\b(?:bread flour|breadcrumbs?|bread crumbs?|bread mix|bread knife|bread bin|bread maker)\b/.test(offerText)) {
@@ -1183,6 +1204,11 @@ function severeIncompatibility(intent: QueryIntent, offerText: string, offeredFa
     && !processedMinceTerms(intent.normalizedQuery).length
     && processedMinceTerms(offerText).length) {
     return "Prepared or pet mince is not plain mince";
+  }
+  if (intent.productFamily === "chicken"
+    && !chickenForm(intent.normalizedQuery)
+    && chickenForm(offerText) === "offal") {
+    return "Chicken offal is not a general chicken match";
   }
   const offeredMeasure = parsePackageMeasure(offerText);
   if (intent.requestedSize && offeredMeasure && intent.requestedSize.kind !== offeredMeasure.kind) {
@@ -1407,7 +1433,7 @@ export async function findBalancedProductCandidates(
   env: Env,
   searchTerms: string[],
   targetRetailers: typeof retailers,
-  options: { matchAll?: boolean; limitPerRetailer?: number } = {},
+  options: { matchAll?: boolean; limitPerRetailer?: number; preferredCategoryFamily?: string } = {},
 ) {
   const terms = [...new Set(searchTerms.filter(Boolean))].slice(0, 8);
   if (!terms.length || !targetRetailers.length) return [] as ProductRow[];
@@ -1419,23 +1445,47 @@ export async function findBalancedProductCandidates(
   const searchClauses = terms
     .map((_, index) => `p.search_text LIKE ?${termOffset + index + 1}`)
     .join(operator);
-  // Scan the product catalogue once. The old UNION repeated the same leading-
-  // wildcard product scan for every retailer and caused production Error 1102.
-  // Retailer balancing happens after the indexed offer lookup and ranking.
+  const categoryPatterns = categorySearchPatterns(options.preferredCategoryFamily);
+  const categoryOffset = termOffset + terms.length;
+  const categoryPriority = categoryPatterns.length
+    ? `CASE WHEN ${categoryPatterns
+      .map((_, index) => `LOWER(COALESCE(p.category, '')) LIKE ?${categoryOffset + index + 1}`)
+      .join(" OR ")} THEN 1 ELSE 0 END`
+    : "0";
+  // Scan the product catalogue once, then rank the matched product/retailer
+  // pairs inside each retailer. A global LIMIT ordered by search-text length
+  // starved SPAR because its official descriptions are longer than most
+  // retailer titles. The old UNION avoided that starvation but repeated the
+  // same leading-wildcard product scan for every retailer and caused Error 1102.
   const { results } = await env.DB.prepare(
-    `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
-     FROM catalogue_products p
-     WHERE (${searchClauses})
-       AND EXISTS (
-         SELECT 1 FROM catalogue_offers o
-         WHERE o.product_id = p.id
-           AND o.retailer_id IN (${retailerBindings.join(",")})
-       )
-     ORDER BY LENGTH(p.search_text) ASC, p.id ASC
+    `WITH retailer_products AS (
+       SELECT DISTINCT
+         p.id, p.canonical_name, p.category, p.target_size,
+         p.search_terms_json, p.search_text, o.retailer_id,
+         ${categoryPriority} AS category_priority
+       FROM catalogue_products p
+       JOIN catalogue_offers o ON o.product_id = p.id
+       WHERE (${searchClauses})
+         AND o.retailer_id IN (${retailerBindings.join(",")})
+     ), ranked_retailer_products AS (
+       SELECT
+         id, canonical_name, category, target_size, search_terms_json, search_text,
+         retailer_id, category_priority,
+         ROW_NUMBER() OVER (
+           PARTITION BY retailer_id
+           ORDER BY category_priority DESC, LENGTH(search_text) ASC, id ASC
+         ) AS retailer_rank
+       FROM retailer_products
+     )
+     SELECT id, canonical_name, category, target_size, search_terms_json, search_text
+     FROM ranked_retailer_products
+     WHERE retailer_rank <= ${perRetailerLimit}
+     ORDER BY retailer_rank ASC, LENGTH(search_text) ASC, id ASC
      LIMIT ${globalLimit}`,
   ).bind(
     ...targetRetailers.map((retailer) => retailer.id),
     ...terms.map((term) => `%${term}%`),
+    ...categoryPatterns,
   )
     .all<ProductRow>();
   const unique = new Map<string, ProductRow>();
@@ -1473,6 +1523,7 @@ async function findClosestBasketMatches(
   const candidateProducts = await findBalancedProductCandidates(env, discoveryTerms, enabledRetailers, {
     matchAll: false,
     limitPerRetailer: 18,
+    preferredCategoryFamily: targetCategory,
   });
   if (!candidateProducts.length) return new Map<string, ClosestBasketMatch>();
 
@@ -1572,12 +1623,13 @@ async function findCatalogue(
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
   const strictTerms = coreTokens.length ? coreTokens : queryTokens;
   const candidateLimit = perRetailer > 0
-    ? Math.min(18, Math.max(8, perRetailer + 6))
-    : 12;
+    ? 30
+    : 24;
   const [strictResults, profileResult] = await Promise.all([
     findBalancedProductCandidates(env, strictTerms, retailers, {
       matchAll: true,
       limitPerRetailer: candidateLimit,
+      preferredCategoryFamily: intent.categoryFamily,
     }),
     env.DB.prepare(
       "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
@@ -1599,6 +1651,7 @@ async function findCatalogue(
     const relaxedResults = await findBalancedProductCandidates(env, relaxedTerms, retailers, {
       matchAll: true,
       limitPerRetailer: candidateLimit,
+      preferredCategoryFamily: intent.categoryFamily,
     });
     for (const product of relaxedResults) strictById.set(product.id, product);
     fallbackUsed.push(familyLookupDiffers ? "product-family" : "search-profile");
@@ -1607,6 +1660,7 @@ async function findCatalogue(
     const broadResults = await findBalancedProductCandidates(env, intent.discoveryTerms, retailers, {
       matchAll: false,
       limitPerRetailer: Math.max(8, candidateLimit),
+      preferredCategoryFamily: intent.categoryFamily,
     });
     for (const product of broadResults) strictById.set(product.id, product);
     fallbackUsed.push("alias-or-fuzzy");
