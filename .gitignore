@@ -12,6 +12,7 @@ data/catalogue/*
 node_modules/
 mobile/node_modules/
 mobile/.expo/
+work-expo-home/
 __pycache__/
 *.pyc
 

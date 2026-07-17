@@ -39,8 +39,16 @@
       },
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c95f0ee4-0323-40d2-bf2c-91d44593d2a3"
+      }
+    },
+    "owner": "randbasket.co.za"
   }
 }
