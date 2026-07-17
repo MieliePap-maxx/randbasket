@@ -80,8 +80,9 @@ This command:
 
 1. Searches Makro's current public catalogue, starting with milk, eggs, bread, beef mince, chicken and flour.
 2. Refuses to continue unless all six basic staple searches returned products.
-3. Imports the Makro batches and the full SPAR product catalogue into the existing D1 database.
-4. Deploys the Worker only after both imports succeed.
+3. Applies the idempotent D1 schema so required search tables exist.
+4. Imports the Makro batches and the full SPAR product catalogue into the existing D1 database.
+5. Deploys the Worker only after both imports succeed.
 
 After one successful run, restore the normal deploy command to `npx wrangler deploy`. Run the catalogue command again whenever Makro prices need refreshing. If the build reports Makro human verification, wait and retry later; do not publish guessed prices.
 
