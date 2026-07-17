@@ -34,25 +34,36 @@ assert.equal(sameCatalogueProduct(items[0], { id: "bread-700g" }, { storeId: "ch
 
 const details = availableProductDetails(
   { id: "milk-2l", canonicalName: "Full cream milk", category: "Dairy" },
-  { storeName: "Checkers", productName: "Housebrand Full Cream Milk 2L", size: "2L", price: 34.99 },
+  {
+    storeName: "Checkers",
+    productName: "Housebrand Full Cream Milk 2L",
+    size: "2L",
+    price: 34.99,
+    howToUse: ["Keep refrigerated", "Use within three days"],
+    matchReasons: ["Same product family", "Matching pack size"],
+  },
 );
 assert.equal(details.name, "Housebrand Full Cream Milk 2L");
 assert.equal(details.description, "", "missing descriptions must remain absent");
 assert.equal(details.facts.some(([label]) => label === "Package size"), true);
 assert.equal(details.facts.some(([label]) => label === "Description"), false);
+assert.equal(details.sections.find(([label]) => label === "How to use")[1], "Keep refrigerated\nUse within three days");
+assert.equal(details.matchReasons.length, 2);
 
 const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
 const appSource = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const serviceWorkerSource = await readFile(new URL("./service-worker.js", import.meta.url), "utf8");
 assert.match(html, /<dialog id="productDetailsDialog"[^>]*aria-labelledby="productDetailsTitle"/);
 assert.match(html, /aria-label="Close product details"/);
-assert.match(appSource, /openProductDetails\(product, store, comparison, imageButton\)/, "product image must open details");
+assert.match(appSource, /class=\"product-details-name\"/, "product names must open details");
+assert.match(appSource, /Why this result is shown/, "details must explain the product match");
+assert.match(appSource, /No extended description has been supplied/, "missing retailer content must have an honest fallback");
 assert.match(appSource, /lastProductDetailsTrigger\?\.focus\?\.\(\)/, "focus must return to the opening image");
 assert.match(appSource, /localStorage\.setItem\(STORAGE_KEY/, "basket persistence must remain enabled");
 assert.match(appSource, /&page=\$\{Math\.max\(1, page\)\}/, "catalogue pagination must be sent to the API");
 assert.match(appSource, /View retailer product/, "retailer product links must remain available");
 assert.match(appSource, /window\.location\.replace\(refreshUrl\.toString\(\)\)/, "stale HTML shells must refresh automatically");
-assert.match(appSource, /service-worker\.js\?v=30/, "the page must request the latest service worker");
+assert.match(appSource, /service-worker\.js\?v=31/, "the page must request the latest service worker");
 assert.match(serviceWorkerSource, /self\.skipWaiting\(\)/, "a repaired service worker must activate immediately");
 assert.match(serviceWorkerSource, /self\.clients\.claim\(\)/, "the repaired service worker must control existing tabs");
 assert.match(serviceWorkerSource, /cache: "no-store"/, "application updates must bypass stale HTTP caches");

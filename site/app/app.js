@@ -417,6 +417,25 @@ function openProductDetails(product, store, comparison, trigger) {
   );
   const productName = cleanDisplayText(details.name) || "Product";
   const description = cleanDisplayText(details.description);
+  const lastChecked = details.lastSeenAt && !Number.isNaN(Date.parse(details.lastSeenAt))
+    ? new Date(details.lastSeenAt).toLocaleString("en-ZA", { dateStyle: "medium", timeStyle: "short" })
+    : "";
+  const matchNotes = [...details.matchReasons, details.alternativeReason].filter(Boolean);
+  const regularPrice = Number(details.regularPrice) > Number(details.price)
+    ? `<span class="product-details-was">Usually ${formatMoney(details.regularPrice)}</span>`
+    : "";
+  const promotion = details.promoText
+    ? `<div class="product-details-promotion"><strong>Current offer</strong><span>${escapeHtml(details.promoText)}</span></div>`
+    : "";
+  const informationSections = details.sections.map(([heading, value]) => `
+    <section class="product-details-section">
+      <h3>${escapeHtml(heading)}</h3>
+      <p>${escapeHtml(value).replace(/\n/g, "<br>")}</p>
+    </section>
+  `).join("");
+  const emptyDescription = !description && !informationSections
+    ? `<p class="product-details-empty">No extended description has been supplied for this product yet. Check the retailer page for ingredients, usage and dietary information.</p>`
+    : "";
   const retailerLink = details.productUrl
     ? `<a class="primary product-details-link" href="${escapeAttr(details.productUrl)}" target="_blank" rel="noopener">View retailer product</a>`
     : "";
@@ -428,10 +447,15 @@ function openProductDetails(product, store, comparison, trigger) {
         <h2 id="productDetailsTitle">${escapeHtml(productName)}</h2>
         ${description ? `<p class="product-details-description">${escapeHtml(description)}</p>` : ""}
         <dl class="product-details-facts">${details.facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
-        <div class="product-details-price"><span>Current price</span><strong>${formatMoney(details.price)}</strong></div>
+        ${promotion}
+        <div class="product-details-price"><span>Current price${regularPrice}</span><strong>${details.price == null ? "Unavailable" : formatMoney(details.price)}</strong></div>
+        ${lastChecked ? `<p class="product-details-updated">Price last checked ${escapeHtml(lastChecked)}</p>` : ""}
         ${retailerLink}
       </div>
     </div>
+    ${matchNotes.length ? `<section class="product-details-match"><h3>Why this result is shown</h3><ul>${matchNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul></section>` : ""}
+    ${informationSections}
+    ${emptyDescription}
   `;
   watchProductImages(content);
   lastProductDetailsTrigger = trigger || document.activeElement;
@@ -615,7 +639,7 @@ function renderCatalogueResults() {
         <div class="catalogue-product-copy">
           ${tierBadge}
           ${bestPriceBadge}
-          <span>${escapeHtml(productName)}</span>
+          <button type="button" class="product-details-name">${escapeHtml(productName)}</button>
           <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
           ${special}
           ${alternative}
@@ -624,10 +648,11 @@ function renderCatalogueResults() {
         <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${effectivePrice}${quantityControlMarkup(existing, productName, true)}</div>
       `;
       const imageButton = article.querySelector(".product-image-button");
-      imageButton.addEventListener("click", (event) => {
+      const detailsTriggers = [imageButton, article.querySelector(".product-details-name")].filter(Boolean);
+      detailsTriggers.forEach((detailsTrigger) => detailsTrigger.addEventListener("click", (event) => {
         event.stopPropagation();
-        openProductDetails(product, store, comparison, imageButton);
-      });
+        openProductDetails(product, store, comparison, detailsTrigger);
+      }));
       wireQuantityControl(article, product, store, state.catalogueQuery || $("#catalogueSearchInput").value.trim());
       columnMatches.appendChild(article);
     });
@@ -1038,7 +1063,7 @@ function renderSpecials() {
       ${productImageMarkup(store.imageUrl, productName, "special-card-image", true)}
       <div class="special-card-copy">
         <span class="special-pill">${special.discountPercent ? `${special.discountPercent}% off` : "Catalogue special"}</span>
-        <strong>${escapeHtml(productName)}</strong>
+        <button type="button" class="product-details-name">${escapeHtml(productName)}</button>
         <small>${escapeHtml([store.storeName, store.size, special.category].filter(Boolean).join(" · "))}</small>
         ${store.promoText ? `<p>${escapeHtml(store.promoText)}</p>` : ""}
       </div>
@@ -1050,7 +1075,9 @@ function renderSpecials() {
       </div>
     `;
     const imageButton = card.querySelector(".product-image-button");
-    imageButton.addEventListener("click", () => openProductDetails(product, store, comparison, imageButton));
+    [imageButton, card.querySelector(".product-details-name")].filter(Boolean).forEach((detailsTrigger) => {
+      detailsTrigger.addEventListener("click", () => openProductDetails(product, store, comparison, detailsTrigger));
+    });
     wireQuantityControl(card, product, store, state.catalogueQuery);
     wrap.appendChild(card);
   });
@@ -1366,7 +1393,7 @@ init().catch((error) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=30", { updateViaCache: "none" })
+      .register("./service-worker.js?v=31", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });
