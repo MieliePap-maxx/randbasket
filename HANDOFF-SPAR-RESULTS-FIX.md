@@ -10,9 +10,9 @@ permission.
 
 - Path: `C:\Users\MieliePap\Documents\South Africa Grocery Price Checker\data\worktrees\spar-results-fix`
 - Branch: `spar-results-fix`
-- Base commit: `45d6540 Fix Expo production build validation`
-- Base remote: `origin/main`
-- No commit or push has been performed for this fix.
+- Fix commit: `29aff22 Fix SPAR catalogue search results`
+- Deployment branch: `origin/main`
+- Pushed to production `main` on 2026-07-18.
 
 ## Root Cause
 
@@ -88,6 +88,12 @@ dependent.
   `MIN_SEMANTIC_SIMILARITY` as a non-handler named export. The production dry
   build succeeds; this local-runtime issue predates and is separate from the
   SPAR query change.
+- Production verification after Cloudflare deployment passed:
+  - `milk`: 26 SPAR candidates, 15 accepted, 10 displayed with Johannesburg location;
+  - `eggs`: 17 SPAR candidates, 16 accepted, 10 displayed;
+  - `flour`: 9 SPAR candidates, 6 accepted, 6 displayed;
+  - `chicken`: 21 SPAR candidates, 8 accepted, 8 displayed;
+  - `milk` without location: 25 SPAR candidates, 14 accepted, 10 displayed.
 
 ## Important Product/Price Behaviour
 
@@ -122,7 +128,8 @@ Set-Location ..
 
 ## Exact Commit And Push Commands
 
-Only run these after the owner explicitly approves commit and push:
+These commands were completed for commit `29aff22` and are retained for audit
+and future reference:
 
 ```powershell
 Set-Location 'C:\Users\MieliePap\Documents\South Africa Grocery Price Checker\data\worktrees\spar-results-fix'
@@ -142,7 +149,8 @@ before pushing.
 
 ## Post-Deploy Verification
 
-Wait for the Cloudflare Worker build from `main` to become green, then run:
+The Cloudflare Worker build from `main` completed and the checks below passed.
+They can be rerun at any time:
 
 ```powershell
 $base = 'https://api.randbasket.co.za/v1/catalogue'
