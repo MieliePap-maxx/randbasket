@@ -331,10 +331,12 @@ Validation already passed:
 - `mobile/app.json` is linked but pending Git commit at handoff creation.
 - Production Android EAS build was successfully submitted to Expo.
 - Build shown in dashboard: Android Play Store build, profile `production`, SDK `54.0.0`, app version `1.0.0 (2)`.
-- It was in **Queued / Free Tier Queue**, waiting for an available worker. This is normal, not a failure.
+- It entered the free-tier queue, then failed Expo Doctor before native compilation because the old Metro config enabled `resolver.unstable_enableSymlinks` and local Expo `54.0.35` was one patch behind the required `54.0.36`.
+- The Metro config was reset to Expo's supported default, `mobile/package.json` now requires `expo ~54.0.36`, and `pnpm install` successfully refreshed `mobile/pnpm-lock.yaml` to Expo `54.0.36`.
+- Local Expo Doctor passed 15/18 checks. Its remaining three failures were all `spawn npm ENOENT` because the bundled Codex runtime provides pnpm but no npm executable; the original Metro and Expo-version failures were resolved. EAS has npm and must perform the authoritative build validation.
 - Build source displayed commit `bd57de4`; the uploaded build archive included the current linked mobile configuration.
 
-Do not start duplicate builds. Enable Expo **Notify me** and wait. When status becomes Finished, download the `.aab` and upload it to Google Play Console internal testing.
+Do not retry that failed build unchanged. Refresh dependencies/lockfile, rerun Expo Doctor, commit the fix, and start one new production build. When status becomes Finished, download the `.aab` and upload it to Google Play Console internal testing.
 
 Exact continuation is in `HANDOFF-GOOGLE-PLAY-AAB.md`.
 

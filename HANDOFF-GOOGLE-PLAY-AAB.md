@@ -55,6 +55,16 @@ The Codex sandbox could not download `eas-cli` because outbound npm access was b
 
 The user created the Expo account with Google/Gmail. At the last prompt, EAS requested an email/username login. Use browser login so the Google password is never entered into PowerShell.
 
+The first queued build later failed Expo Doctor. The source fix resets `mobile/metro.config.js` to Expo's default configuration and requires Expo `~54.0.36`. The lockfile was refreshed successfully with pnpm. Local Expo Doctor then passed 15/18 checks; the remaining three checks failed only because the bundled Codex runtime has no `npm` executable (`spawn npm ENOENT`). EAS builders include npm and will perform the authoritative validation.
+
+```powershell
+cd mobile
+pnpm install
+pnpm dlx expo-doctor
+```
+
+Do not rebuild if Metro or Expo dependency-version checks fail. The known local-only `spawn npm ENOENT` checks are an environment limitation, not a source failure.
+
 From `mobile`:
 
 ```powershell
