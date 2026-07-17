@@ -11,10 +11,6 @@ FEEDBACK_TO = "randbasketzar@gmail.com"
 [ai]
 binding = "AI"
 
-[[vectorize]]
-binding = "PRODUCT_VECTORS"
-index_name = "randbasket-products"
-
 [[send_email]]
 name = "FEEDBACK_EMAIL"
 destination_address = "randbasketzar@gmail.com"

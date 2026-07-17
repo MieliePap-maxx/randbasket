@@ -2,7 +2,7 @@ export interface Env {
   APP_ORIGIN: string;
   AI: Ai;
   DB: D1Database;
-  PRODUCT_VECTORS: VectorizeIndex;
+  PRODUCT_VECTORS?: VectorizeIndex;
   FEEDBACK_EMAIL: {
     send(message: {
       from: string;
@@ -493,7 +493,8 @@ export async function findSemanticProductCandidates(
   query: string,
   options: { limit?: number } = {},
 ): Promise<SemanticCandidate[]> {
-  if (!shouldRunSemanticSearch(query) || !env.AI || !env.PRODUCT_VECTORS) return [];
+  const productVectors = env.PRODUCT_VECTORS;
+  if (!shouldRunSemanticSearch(query) || !env.AI || !productVectors) return [];
   try {
     const response = await env.AI.run(PRODUCT_EMBEDDING_MODEL, {
       text: [stripRetailerAliases(query)],
@@ -502,7 +503,7 @@ export async function findSemanticProductCandidates(
     const vector = embeddingVectors(response)[0];
     if (!vector || vector.length !== PRODUCT_EMBEDDING_DIMENSIONS) return [];
     const topK = Math.min(50, Math.max(1, options.limit || SEMANTIC_CANDIDATE_LIMIT));
-    const result = await env.PRODUCT_VECTORS.query(vector, {
+    const result = await productVectors.query(vector, {
       topK,
       returnMetadata: "none",
       returnValues: false,
@@ -1528,7 +1529,8 @@ function splitAggregatedValues(value: string | null) {
 }
 
 async function indexProductVectorsResponse(request: Request, env: Env) {
-  if (!env.VECTOR_INDEX_TOKEN) {
+  const productVectors = env.PRODUCT_VECTORS;
+  if (!productVectors || !env.VECTOR_INDEX_TOKEN) {
     return json(request, env, { ok: false, error: "Vector indexing is not configured." }, 503);
   }
   if (!await authorizedVectorIndexRequest(request, env)) {
@@ -1619,7 +1621,7 @@ async function indexProductVectorsResponse(request: Request, env: Env) {
         || vectors.some((vector) => vector.length !== PRODUCT_EMBEDDING_DIMENSIONS)) {
         throw new Error("Workers AI returned an unexpected embedding shape.");
       }
-      await withRetries(() => env.PRODUCT_VECTORS.upsert(changed.map((entry, index) => ({
+      await withRetries(() => productVectors.upsert(changed.map((entry, index) => ({
         id: entry.product.id,
         values: vectors[index],
         metadata: {

@@ -58,6 +58,14 @@ The public site key is included in the web client. The Worker validates every fe
 
 RandBasket supplements keyword and typo-tolerant catalogue search with semantic candidate discovery. Product and query embeddings use Cloudflare Workers AI model `@cf/baai/bge-small-en-v1.5` with `cls` pooling. The model produces 384-dimensional vectors, stored in the `randbasket-products` Vectorize index with cosine similarity.
 
+Vectorize is optional. Deployments without permission to create or bind an index omit the `[[vectorize]]` block in `wrangler.toml`; catalogue search then falls back automatically to D1 keyword search, typo tolerance, Levenshtein similarity and the structured product-matching rules. Add the binding below only after the index exists:
+
+```toml
+[[vectorize]]
+binding = "PRODUCT_VECTORS"
+index_name = "randbasket-products"
+```
+
 Vector matches use an initial minimum cosine score of `0.78`. They only add candidate product IDs: D1 remains authoritative, and category, characteristic, quantity, unit, size, location and retailer-offer checks still reject unsafe matches. Exact and typo-tolerant keyword scores remain dominant in final ranking.
 
 Create the index and the private indexing token once:
