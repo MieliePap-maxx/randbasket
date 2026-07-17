@@ -591,20 +591,81 @@ button:disabled {
 
 .catalogue-results {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 13px;
+  grid-template-columns: repeat(5, minmax(230px, 1fr));
+  gap: 0;
   margin-top: 16px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f7faf8;
+  scrollbar-color: #b8cbbf transparent;
+  scroll-snap-type: x proximity;
+}
+
+.catalogue-retailer-column {
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  padding: 0 10px 12px;
+  scroll-snap-align: start;
+}
+
+.catalogue-retailer-column:first-child { border-left: 0; }
+
+.catalogue-retailer-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 68px;
+  margin: 0 -10px 10px;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 10px;
+  background: #fff;
+}
+
+.catalogue-retailer-heading h3,
+.catalogue-retailer-heading p { margin: 0; }
+.catalogue-retailer-heading h3 { font-size: 0.98rem; }
+.catalogue-retailer-heading p { margin-top: 2px; color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+
+.retailer-initial {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--green-dark);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+.retailer-checkers .retailer-initial { background: #1679bd; }
+.retailer-woolworths .retailer-initial { background: #161616; }
+.retailer-spar .retailer-initial { background: #168247; }
+.retailer-makro .retailer-initial { background: #d8232a; }
+
+.catalogue-retailer-matches { display: grid; align-content: start; gap: 9px; }
+.catalogue-retailer-empty {
+  min-height: 112px;
+  border: 1px dashed #c7d5cc;
+  border-radius: 10px;
+  padding: 18px 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.62);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .catalogue-store-result {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 108px;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  min-height: 0;
   border: 1px solid var(--line);
-  border-radius: 17px;
-  padding: 13px;
+  border-radius: 11px;
+  padding: 10px;
   background: #fff;
   box-shadow: 0 3px 0 rgba(15, 58, 43, 0.025);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
@@ -638,8 +699,8 @@ button:disabled {
 .catalogue-image,
 .catalogue-image img,
 .catalogue-image-placeholder {
-  width: 76px;
-  height: 76px;
+  width: 58px;
+  height: 58px;
 }
 
 .catalogue-image img {
@@ -703,15 +764,23 @@ button:disabled {
 }
 
 .catalogue-price {
-  align-items: flex-end;
+  grid-column: 1 / -1;
+  align-items: center;
   display: flex;
-  flex-direction: column;
-  min-width: 82px;
-  text-align: right;
+  flex-flow: row wrap;
+  gap: 7px;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  text-align: left;
+}
+
+.catalogue-retailer-column .catalogue-price {
+  grid-column: 1 / -1;
 }
 
 .catalogue-add-btn {
-  margin-top: 8px;
+  margin-left: auto;
   padding: 7px 9px;
   white-space: nowrap;
 }
@@ -767,7 +836,6 @@ button:disabled {
 }
 
 @media (max-width: 1080px) {
-  .catalogue-results,
   .specials-grid {
     grid-template-columns: 1fr;
   }

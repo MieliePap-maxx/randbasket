@@ -163,6 +163,16 @@ function cleanDisplayText(value) {
 }
 
 const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
+const retailerAliases = [
+  "pick n pay",
+  "pick and pay",
+  "pnp",
+  "checkers",
+  "woolworths",
+  "woolies",
+  "spar",
+  "makro",
+];
 
 const measurementUnits = {
   mg: { dimension: "mass", baseMultiplier: 0.001, comparisonAmount: 1000, comparisonUnit: "kg" },
@@ -292,14 +302,39 @@ function renderItems() {
   $(".table-wrap").hidden = state.items.length === 0;
 }
 
+function stripComparisonBranding(value, brand = "") {
+  let text = cleanDisplayText(value).toLowerCase();
+  [...retailerAliases, brand]
+    .filter(Boolean)
+    .sort((left, right) => String(right).length - String(left).length)
+    .forEach((term) => {
+      const escaped = String(term).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      text = text.replace(new RegExp(`\\b${escaped}\\b`, "gi"), " ");
+    });
+  return text
+    .replace(/[^a-z0-9.,]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function buildComparisonQuery(product, store, preferredQuery = "") {
+  const searchTerms = Array.isArray(product.searchTerms) ? [...product.searchTerms].filter(Boolean) : [];
+  const source = preferredQuery
+    || searchTerms.sort((left, right) => String(right).length - String(left).length)[0]
+    || product.canonicalName
+    || store.productName
+    || "product";
+  let query = stripComparisonBranding(source, store.brand);
+  const targetSize = cleanDisplayText(store.size || product.targetSize || "");
+  if (targetSize && !parseMeasurement(query)) query = `${query} ${targetSize}`.trim();
+  return query;
+}
+
 function renderCatalogueResults() {
   const wrap = $("#catalogueResults");
   const pagination = $("#cataloguePagination");
   wrap.innerHTML = "";
-  pagination.hidden = state.catalogueResults.length === 0;
-  $("#cataloguePreviousBtn").disabled = state.cataloguePage <= 1;
-  $("#catalogueMoreBtn").disabled = !state.catalogueHasMore;
-  $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage}`;
+  pagination.hidden = true;
   if (!state.catalogueResults.length) return;
 
   const retailerMatches = state.catalogueRetailerMatches.length
@@ -336,69 +371,92 @@ function renderCatalogueResults() {
   }));
   const isBestValue = ({ comparison }) => comparison
     && comparison.unitPrice === rankings.get(comparison.dimension)?.best;
-  if (state.cataloguePage === 1) {
-    matches.sort((left, right) => {
-      const suggestedOrder = Number(isBestValue(right)) - Number(isBestValue(left));
-      if (suggestedOrder) return suggestedOrder;
-      if (left.comparison && right.comparison && left.comparison.dimension === right.comparison.dimension) {
-        return left.comparison.unitPrice - right.comparison.unitPrice;
-      }
-      if (left.comparison && !right.comparison) return -1;
-      if (!left.comparison && right.comparison) return 1;
-      return comparisonStoreOrder.indexOf(left.store.storeId) - comparisonStoreOrder.indexOf(right.store.storeId);
-    });
-  }
+  const groupedMatches = new Map(defaultStores.map((retailer) => [retailer.id, []]));
+  matches.forEach((match) => groupedMatches.get(match.store.storeId)?.push(match));
+  groupedMatches.forEach((storeMatches) => storeMatches.sort((left, right) => {
+    const suggestedOrder = Number(isBestValue(right)) - Number(isBestValue(left));
+    if (suggestedOrder) return suggestedOrder;
+    if (left.comparison && right.comparison && left.comparison.dimension === right.comparison.dimension) {
+      return left.comparison.unitPrice - right.comparison.unitPrice;
+    }
+    if (left.comparison && !right.comparison) return -1;
+    if (!left.comparison && right.comparison) return 1;
+    return left.store.productName.localeCompare(right.store.productName);
+  }));
 
-  matches.forEach((match) => {
-    const article = document.createElement("article");
-    const { product, store, comparison } = match;
-    const isBestPrice = state.cataloguePage === 1 && isBestValue(match);
-    const isSuggested = isBestPrice;
-    const ranking = comparison ? rankings.get(comparison.dimension) : null;
-    const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
-    article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
-    const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
-    const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
-    const bestPriceBadge = isBestPrice
-      ? `<span class="best-price-badge">${isSuggested ? "Suggested - " : ""}Best price per ${comparison.comparisonUnit}${saving > 0 ? ` - ${formatMoney(saving)}/${comparison.comparisonUnit} less` : ""}</span>`
-      : "";
-    const unitPrice = comparison
-      ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
-      : "";
-    const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-    const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
-    const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
-    article.innerHTML = `
-      <div class="catalogue-image">${image}</div>
-      <div class="catalogue-product-copy">
-        ${bestPriceBadge}
-        <strong>${escapeHtml(store.storeName)}</strong>
-        <span>${escapeHtml(productName)}</span>
-        <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
-        ${special}
-        ${link}
-      </div>
-      <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
+  defaultStores.forEach((retailer) => {
+    const storeMatches = groupedMatches.get(retailer.id) || [];
+    const column = document.createElement("section");
+    column.className = `catalogue-retailer-column retailer-${retailer.id}`;
+    column.dataset.retailerColumn = retailer.id;
+    column.innerHTML = `
+      <header class="catalogue-retailer-heading">
+        <span class="retailer-initial" aria-hidden="true">${escapeHtml(retailer.name.charAt(0))}</span>
+        <div><h3>${escapeHtml(retailer.name)}</h3><p>${storeMatches.length ? `${storeMatches.length} closest matches` : "No priced matches yet"}</p></div>
+      </header>
+      <div class="catalogue-retailer-matches"></div>
     `;
-    article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store));
-    wrap.appendChild(article);
+    const columnMatches = column.querySelector(".catalogue-retailer-matches");
+    if (!storeMatches.length) {
+      columnMatches.innerHTML = `<div class="catalogue-retailer-empty">No close match is currently held for this retailer.</div>`;
+    }
+
+    storeMatches.forEach((match) => {
+      const article = document.createElement("article");
+      const { product, store, comparison } = match;
+      const isBestPrice = isBestValue(match);
+      const ranking = comparison ? rankings.get(comparison.dimension) : null;
+      const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
+      article.className = `catalogue-store-result${isBestPrice ? " best-price-result" : ""}`;
+      const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
+      const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
+      const bestPriceBadge = isBestPrice
+        ? `<span class="best-price-badge">Best value${saving > 0 ? ` - ${formatMoney(saving)}/${comparison.comparisonUnit} less` : ""}</span>`
+        : "";
+      const unitPrice = comparison
+        ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
+        : "";
+      const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
+      const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
+      const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
+      article.innerHTML = `
+        <div class="catalogue-image">${image}</div>
+        <div class="catalogue-product-copy">
+          ${bestPriceBadge}
+          <span>${escapeHtml(productName)}</span>
+          <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
+          ${special}
+          ${link}
+        </div>
+        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
+      `;
+      article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store, $("#catalogueSearchInput").value.trim()));
+      columnMatches.appendChild(article);
+    });
+    wrap.appendChild(column);
   });
 }
 
-async function addCatalogueProductToBasket(product, store) {
+async function addCatalogueProductToBasket(product, store, preferredQuery = "") {
   const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
   const existing = state.items.find((item) => item.links?.[store.storeId] === store.url);
   if (existing) {
     $("#catalogueStatus").textContent = `${productName} is already in the basket.`;
     return;
   }
+  const comparisonQuery = buildComparisonQuery(product, store, preferredQuery);
   state.items.push({
     id: `${product.id}-${store.storeId}-${Date.now()}`,
     name: productName,
-    query: productName,
+    query: comparisonQuery,
+    comparisonQuery,
     targetSize: store.size || product.targetSize || "",
     quantity: 1,
     category: product.category || "",
+    selectedProductId: product.id,
+    selectedProductName: productName,
+    selectedBrand: store.brand || "",
+    imageUrl: store.imageUrl || "",
     selectedStoreId: store.storeId,
     selectedStoreName: store.storeName,
     selectedPrice: store.price,
@@ -410,7 +468,7 @@ async function addCatalogueProductToBasket(product, store) {
   scheduleBasketScan(150);
 }
 
-async function searchCatalogue(page = 1) {
+async function searchCatalogue() {
   const query = $("#catalogueSearchInput").value.trim();
   if (!query) {
     $("#catalogueStatus").textContent = "Type a product to compare.";
@@ -421,18 +479,20 @@ async function searchCatalogue(page = 1) {
   $("#catalogueLoading").hidden = false;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
-    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${locationQuery()}`);
+    readSettingsFromDom();
+    const matchesPerRetailer = Math.min(12, Math.max(1, Number(state.settings.maxResultsPerStore || 6)));
+    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
-    state.cataloguePage = payload.page || page;
-    state.catalogueHasMore = Boolean(payload.hasMore);
+    state.cataloguePage = 1;
+    state.catalogueHasMore = false;
     $("#catalogueStatus").textContent = state.catalogueResults.length
       ? `Comparable unit prices for ${query}`
       : "No priced catalogue matches yet.";
     renderCatalogueResults();
   } catch (error) {
     $("#catalogueStatus").innerHTML = `We could not load product matches. <button class="inline-retry" type="button">Try again</button>`;
-    $("#catalogueStatus .inline-retry")?.addEventListener("click", () => searchCatalogue(page));
+    $("#catalogueStatus .inline-retry")?.addEventListener("click", searchCatalogue);
   } finally {
     button.disabled = false;
     $("#catalogueLoading").hidden = true;
@@ -1025,6 +1085,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=26").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=27").catch(() => {});
   });
 }

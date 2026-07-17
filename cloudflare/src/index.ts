@@ -1,6 +1,8 @@
 export interface Env {
   APP_ORIGIN: string;
+  AI: Ai;
   DB: D1Database;
+  PRODUCT_VECTORS: VectorizeIndex;
   FEEDBACK_EMAIL: {
     send(message: {
       from: string;
@@ -12,6 +14,7 @@ export interface Env {
   FEEDBACK_FROM: string;
   FEEDBACK_TO: string;
   TURNSTILE_SECRET_KEY: string;
+  VECTOR_INDEX_TOKEN?: string;
 }
 
 type TurnstileVerification = {
@@ -62,6 +65,28 @@ type SearchProfileRow = {
   preferred_terms_json: string;
 };
 
+type VocabularyRow = {
+  term: string;
+  usage_count: number;
+};
+
+type EmbeddingProductRow = ProductRow & {
+  brands: string | null;
+  retailer_names: string | null;
+};
+
+export type SemanticCandidate = {
+  productId: string;
+  score: number;
+};
+
+type HybridCandidate = {
+  productId: string;
+  lexicalScore: number;
+  semanticScore: number;
+  sources: Array<"keyword" | "vector">;
+};
+
 type BasketItem = {
   id?: string;
   name?: string;
@@ -95,6 +120,41 @@ const retailers = [
   { id: "woolworths", name: "Woolworths" },
   { id: "spar", name: "SPAR" },
   { id: "makro", name: "Makro" },
+];
+
+export const PRODUCT_EMBEDDING_MODEL = "@cf/baai/bge-small-en-v1.5";
+export const PRODUCT_EMBEDDING_DIMENSIONS = 384;
+export const PRODUCT_EMBEDDING_POOLING = "cls";
+export const PRODUCT_VECTOR_INDEX_NAME = "randbasket-products";
+export const MIN_SEMANTIC_SIMILARITY = 0.78;
+const SEMANTIC_CANDIDATE_LIMIT = 40;
+const VECTOR_INDEX_BATCH_SIZE = 32;
+
+const semanticAliasRules = [
+  {
+    matches: /\b(?:full cream|whole|full fat)\s+(?:fresh\s+)?milk\b/,
+    aliases: ["full cream milk", "whole milk", "full fat milk", "fresh dairy milk"],
+  },
+  {
+    matches: /\b(?:boerewors|steaks?|lamb chops?|sosaties?|chicken wings?|chicken drumsticks?)\b/,
+    aliases: ["food for a braai", "braai food", "barbecue meat"],
+  },
+  {
+    matches: /\b(?:children s|childrens|kids?|family)\s+(?:breakfast\s+)?cereal\b|\bbreakfast cereal\b/,
+    aliases: ["children's cereal", "kids cereal", "family breakfast cereal"],
+  },
+  {
+    matches: /\bbread\b/,
+    aliases: ["bread for toast", "toast bread", "sandwich bread"],
+  },
+  {
+    matches: /\b(?:washing powder|laundry detergent)\b/,
+    aliases: ["washing powder", "laundry detergent", "clothes washing detergent"],
+  },
+  {
+    matches: /\bsensitive(?: skin)?\b/,
+    aliases: ["sensitive skin", "gentle", "hypoallergenic"],
+  },
 ];
 
 function corsHeaders(request: Request, env: Env) {
@@ -138,11 +198,151 @@ function tokens(text: string) {
   return [...new Set(clean(text).split(" ").filter((term) => term.length > 1))];
 }
 
+const fuzzyMeasurementTokens = new Set(["kg", "g", "ml", "l", "ct", "pk", "pack"]);
+
+function orderedTokens(text: string) {
+  return clean(text).split(" ").filter(Boolean);
+}
+
+function isNumericToken(value: string) {
+  return /\d/.test(value);
+}
+
+function isMeaningfulFuzzyToken(value: string) {
+  return Boolean(value)
+    && !isNumericToken(value)
+    && !fuzzyMeasurementTokens.has(value);
+}
+
+export function levenshteinDistance(leftValue: string, rightValue: string) {
+  const left = clean(leftValue);
+  const right = clean(rightValue);
+  if (left === right) return 0;
+  if (!left.length) return right.length;
+  if (!right.length) return left.length;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+export function fuzzyTokenSimilarity(queryToken: string, candidateToken: string) {
+  const left = clean(queryToken);
+  const right = clean(candidateToken);
+  if (!left || !right) return 0;
+  if (!isMeaningfulFuzzyToken(left) || !isMeaningfulFuzzyToken(right)) return 0;
+  if (left === right) return 1;
+  if (left.length < 4 || right.length < 4) return 0;
+  const maximumDistance = Math.max(left.length, right.length) <= 5 ? 1 : 2;
+  const distance = levenshteinDistance(left, right);
+  if (distance > maximumDistance) return 0;
+  const longest = Math.max(left.length, right.length);
+  return longest ? Math.max(0, 1 - distance / longest) : 0;
+}
+
+export function fuzzyQueryCoverage(query: string, candidateText: string) {
+  const queryTokens = orderedTokens(query).filter(isMeaningfulFuzzyToken);
+  const candidateTokens = orderedTokens(candidateText).filter(isMeaningfulFuzzyToken);
+  if (!queryTokens.length || !candidateTokens.length) return 0;
+  const usedCandidates = new Set<number>();
+  let total = 0;
+  for (const queryToken of queryTokens) {
+    let bestIndex = -1;
+    let bestScore = 0;
+    for (let index = 0; index < candidateTokens.length; index += 1) {
+      if (usedCandidates.has(index)) continue;
+      const candidateToken = candidateTokens[index];
+      const score = queryToken === candidateToken ? 1 : fuzzyTokenSimilarity(queryToken, candidateToken);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+    if (bestIndex >= 0) usedCandidates.add(bestIndex);
+    total += bestScore;
+  }
+  return total / queryTokens.length;
+}
+
+export const fuzzyTermCoverage = fuzzyQueryCoverage;
+
 export function stripRetailerAliases(text: string) {
   return clean(text)
     .replace(/\b(?:pick n pay|pick and pay|pnp|checkers|woolworths|woolies|spar|makro)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function chooseVocabularyCorrection(tokenValue: string, candidates: VocabularyRow[]) {
+  const token = clean(tokenValue);
+  if (token.length < 4 || !isMeaningfulFuzzyToken(token)) return token;
+  const ranked = candidates
+    .map((candidate) => ({
+      term: clean(candidate.term),
+      usageCount: Number(candidate.usage_count || 0),
+      similarity: fuzzyTokenSimilarity(token, candidate.term),
+    }))
+    .filter((candidate) => candidate.term && candidate.similarity >= 0.8)
+    .sort((left, right) =>
+      right.similarity - left.similarity
+      || right.usageCount - left.usageCount
+      || left.term.localeCompare(right.term));
+  const best = ranked[0];
+  if (!best) return token;
+  const second = ranked[1];
+  if (second
+    && best.similarity - second.similarity < 0.05
+    && best.usageCount < Math.max(2, second.usageCount * 2)) return token;
+  return best.term;
+}
+
+async function correctCatalogueQuery(env: Env, originalQuery: string, correctionEnabled: boolean) {
+  const normalizedQuery = clean(originalQuery);
+  if (!correctionEnabled) {
+    return { correctedQuery: normalizedQuery, correctionApplied: false };
+  }
+  const queryTokens = orderedTokens(normalizedQuery);
+  const meaningfulTokens = [...new Set(queryTokens.filter((token) =>
+    token.length >= 4 && isMeaningfulFuzzyToken(token)))];
+  if (!meaningfulTokens.length) {
+    return { correctedQuery: normalizedQuery, correctionApplied: false };
+  }
+  try {
+    const placeholders = meaningfulTokens.map(() => "?").join(",");
+    const { results: knownRows } = await env.DB.prepare(
+      `SELECT term, usage_count FROM search_vocabulary WHERE term IN (${placeholders})`,
+    ).bind(...meaningfulTokens).all<VocabularyRow>();
+    const knownTerms = new Set(knownRows.map((row) => clean(row.term)));
+    const corrections = new Map<string, string>();
+    for (const token of meaningfulTokens) {
+      if (knownTerms.has(token)) continue;
+      const { results: candidates } = await env.DB.prepare(
+        `SELECT term, usage_count FROM search_vocabulary
+         WHERE first_character = ?1 AND term_length BETWEEN ?2 AND ?3
+         ORDER BY usage_count DESC, term ASC
+         LIMIT 200`,
+      ).bind(token[0], Math.max(4, token.length - 2), token.length + 2).all<VocabularyRow>();
+      const corrected = chooseVocabularyCorrection(token, candidates);
+      if (corrected && corrected !== token) corrections.set(token, corrected);
+    }
+    const correctedTokens = queryTokens.map((token) => corrections.get(token) || token);
+    return {
+      correctedQuery: correctedTokens.join(" "),
+      correctionApplied: corrections.size > 0,
+    };
+  } catch {
+    // Older deployments may not have the vocabulary migration yet.
+    return { correctedQuery: normalizedQuery, correctionApplied: false };
+  }
 }
 
 function parseJsonArray(value: string) {
@@ -154,26 +354,210 @@ function parseJsonArray(value: string) {
   }
 }
 
-function scoreProduct(query: string, product: ProductRow, profiles: SearchProfileRow[]) {
+function uniqueCleanValues(values: Array<string | null | undefined>, limit = 12) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = clean(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function sortedUniqueCleanValues(values: Array<string | null | undefined>, limit = 12) {
+  return uniqueCleanValues(values, Number.MAX_SAFE_INTEGER).sort().slice(0, limit);
+}
+
+function controlledSemanticAliases(text: string) {
+  const normalized = clean(text);
+  return uniqueCleanValues(semanticAliasRules
+    .filter((rule) => rule.matches.test(normalized))
+    .flatMap((rule) => rule.aliases), 16);
+}
+
+export function buildProductEmbeddingText(
+  product: ProductRow,
+  options: {
+    brands?: string[];
+    retailerNames?: string[];
+    profiles?: SearchProfileRow[];
+  } = {},
+) {
+  const searchTerms = parseJsonArray(product.search_terms_json);
+  const profileTerms = (options.profiles || [])
+    .filter((profile) => matchesSearchTerm(
+      `${product.canonical_name} ${product.search_text}`,
+      profile.term,
+    ))
+    .flatMap((profile) => [
+      profile.term,
+      ...parseJsonArray(profile.preferred_terms_json),
+    ]);
+  const aliases = controlledSemanticAliases([
+    product.canonical_name,
+    product.category,
+    product.search_text,
+    ...searchTerms,
+    ...profileTerms,
+  ].join(" "));
+  const lines = [
+    `Product: ${clean(product.canonical_name)}`,
+    product.category ? `Category: ${clean(product.category)}` : "",
+    product.target_size ? `Target size: ${clean(product.target_size)}` : "",
+    searchTerms.length ? `Search terms: ${sortedUniqueCleanValues(searchTerms).join(", ")}` : "",
+    product.search_text ? `Search text: ${clean(product.search_text)}` : "",
+    profileTerms.length ? `Preferred terms: ${sortedUniqueCleanValues(profileTerms).join(", ")}` : "",
+    aliases.length ? `Aliases: ${aliases.sort().join(", ")}` : "",
+    options.brands?.length ? `Brands: ${sortedUniqueCleanValues(options.brands, 8).join(", ")}` : "",
+    options.retailerNames?.length
+      ? `Retailer names: ${sortedUniqueCleanValues(options.retailerNames, 5).join("; ")}`
+      : "",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+export function mergeHybridCandidates(
+  lexicalCandidates: Array<{ productId: string; lexicalScore: number }>,
+  semanticCandidates: SemanticCandidate[],
+) {
+  const merged = new Map<string, HybridCandidate>();
+  for (const candidate of lexicalCandidates) {
+    merged.set(candidate.productId, {
+      productId: candidate.productId,
+      lexicalScore: candidate.lexicalScore,
+      semanticScore: 0,
+      sources: ["keyword"],
+    });
+  }
+  for (const candidate of semanticCandidates) {
+    if (candidate.score < MIN_SEMANTIC_SIMILARITY) continue;
+    const existing = merged.get(candidate.productId);
+    if (existing) {
+      existing.semanticScore = Math.max(existing.semanticScore, candidate.score);
+      if (!existing.sources.includes("vector")) existing.sources.push("vector");
+    } else {
+      merged.set(candidate.productId, {
+        productId: candidate.productId,
+        lexicalScore: 0,
+        semanticScore: candidate.score,
+        sources: ["vector"],
+      });
+    }
+  }
+  return [...merged.values()];
+}
+
+export function semanticScoreBonus(score: number) {
+  if (score < MIN_SEMANTIC_SIMILARITY) return 0;
+  return Math.min(0.8, (score - MIN_SEMANTIC_SIMILARITY) * 4);
+}
+
+function embeddingVectors(response: unknown) {
+  if (!response || typeof response !== "object") return [] as number[][];
+  const data = (response as { data?: unknown }).data;
+  if (!Array.isArray(data)) return [] as number[][];
+  if (data.length && data.every((value) => typeof value === "number")) return [data as number[]];
+  return data.filter((value): value is number[] =>
+    Array.isArray(value) && value.every((entry) => typeof entry === "number"));
+}
+
+function shouldRunSemanticSearch(query: string) {
+  const normalized = stripRetailerAliases(query);
+  if (!normalized || /^https?:\/\//i.test(query)) return false;
+  const meaningful = orderedTokens(normalized).filter((term) =>
+    isMeaningfulFuzzyToken(term) && term.length >= 3);
+  return meaningful.length > 0 && !/^[a-z]{0,4}\d{5,}$/i.test(normalized.replace(/\s+/g, ""));
+}
+
+export async function findSemanticProductCandidates(
+  env: Pick<Env, "AI" | "PRODUCT_VECTORS">,
+  query: string,
+  options: { limit?: number } = {},
+): Promise<SemanticCandidate[]> {
+  if (!shouldRunSemanticSearch(query) || !env.AI || !env.PRODUCT_VECTORS) return [];
+  try {
+    const response = await env.AI.run(PRODUCT_EMBEDDING_MODEL, {
+      text: [stripRetailerAliases(query)],
+      pooling: PRODUCT_EMBEDDING_POOLING,
+    });
+    const vector = embeddingVectors(response)[0];
+    if (!vector || vector.length !== PRODUCT_EMBEDDING_DIMENSIONS) return [];
+    const topK = Math.min(50, Math.max(1, options.limit || SEMANTIC_CANDIDATE_LIMIT));
+    const result = await env.PRODUCT_VECTORS.query(vector, {
+      topK,
+      returnMetadata: "none",
+      returnValues: false,
+    });
+    return (result.matches || [])
+      .map((match) => ({ productId: String(match.id), score: Number(match.score) }))
+      .filter((candidate) =>
+        candidate.productId
+        && Number.isFinite(candidate.score)
+        && candidate.score >= MIN_SEMANTIC_SIMILARITY);
+  } catch (error) {
+    console.warn("Semantic catalogue search unavailable; using lexical search only.", error);
+    return [];
+  }
+}
+
+function semanticSafetyQuery(query: string) {
+  const normalized = stripRetailerAliases(query);
+  if (/\b(?:whole|full fat)\s+(?:fresh\s+)?milk\b/.test(normalized)
+    && !includesPhrase(normalized, "full cream")) {
+    return `${normalized} full cream`;
+  }
+  return normalized;
+}
+
+export function semanticCandidatePassesHardRules(
+  query: string,
+  product: ProductRow,
+  store: { productName: string; brand?: string; size?: string },
+  profiles: SearchProfileRow[],
+) {
+  const safetyQuery = semanticSafetyQuery(query);
+  const offerText = clean([store.productName, store.brand, store.size].join(" "));
+  const requestedFamily = inferredCategoryFamily(safetyQuery);
+  const offeredFamily = resolvedCategoryFamily(product.category, `${product.search_text} ${offerText}`);
+  if (requestedFamily && offeredFamily && requestedFamily !== offeredFamily) return false;
+  if (!compareCharacteristics(safetyQuery, offerText).valid) return false;
+  const size = sizeCompatibility(query, store.size || store.productName);
+  if (!size.valid) return false;
+  const requestedMeasure = parseMeasure(query);
+  const offeredMeasure = parseMeasure(store.size || store.productName);
+  if (requestedMeasure?.kind === "count"
+    && offeredMeasure?.kind === "count"
+    && requestedMeasure.amount !== offeredMeasure.amount) return false;
+  return isStoreEligible(safetyQuery, product.category || undefined, store, profiles);
+}
+
+export function scoreProduct(query: string, product: ProductRow, profiles: SearchProfileRow[]) {
   const normalizedQuery = stripRetailerAliases(query);
   const searchText = product.search_text || "";
-  const queryTokens = tokens(query);
-  const hits = queryTokens.filter((term) => searchText.includes(term)).length;
-  if (!hits) return -999;
+  const queryTokens = tokens(normalizedQuery);
+  const searchTokens = tokens(searchText);
+  const exactHits = queryTokens.filter((term) => searchTokens.includes(term)).length;
+  const exactCoverage = exactHits / Math.max(queryTokens.length, 1);
+  const fuzzyCoverage = fuzzyQueryCoverage(normalizedQuery, searchText);
+  if (!exactHits && fuzzyCoverage < 0.72) return -999;
 
-  let score = hits / Math.max(queryTokens.length, 1);
+  let score = Math.max(exactCoverage, fuzzyCoverage);
+  if (fuzzyCoverage > exactCoverage) score += Math.min(0.25, (fuzzyCoverage - exactCoverage) * 0.35);
   const canonical = clean(product.canonical_name);
   if (canonical === normalizedQuery) score += 5;
   else if (canonical.startsWith(normalizedQuery)) score += 2.5;
   else if (canonical.includes(normalizedQuery)) score += 1.25;
   if (product.target_size && normalizedQuery.includes(clean(product.target_size))) score += 2;
 
-  const longestProfile = profiles
-    .filter((profile) => normalizedQuery.includes(clean(profile.term)))
-    .sort((a, b) => clean(b.term).length - clean(a.term).length)[0];
+  const longestProfile = matchingProfile(normalizedQuery, canonical, profiles);
   if (longestProfile) {
-    if (longestProfile.category && product.category === longestProfile.category) score += 3;
-    else if (longestProfile.category && product.category) score -= 1.5;
+    const profileFamily = categoryFamily(longestProfile.category);
+    const productFamily = resolvedCategoryFamily(product.category, searchText);
+    if (profileFamily && productFamily === profileFamily) score += 3;
+    else if (profileFamily && productFamily) score -= 1.5;
     for (const term of parseJsonArray(longestProfile.exclude_terms_json)) {
       const excluded = clean(term);
       if (excluded && !normalizedQuery.includes(excluded) && searchText.includes(excluded)) score -= 5;
@@ -186,22 +570,25 @@ function scoreProduct(query: string, product: ProductRow, profiles: SearchProfil
   return score;
 }
 
-function scoreStore(query: string, product: ProductRow, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
+export function scoreStore(query: string, product: ProductRow, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
   const normalizedQuery = stripRetailerAliases(query);
   const offerText = clean([store.productName, store.brand, store.size].join(" "));
-  const profile = profiles
-    .filter((entry) => normalizedQuery.includes(clean(entry.term)))
-    .sort((a, b) => clean(b.term).length - clean(a.term).length)[0];
-  const queryTokens = tokens(query);
+  const profile = matchingProfile(normalizedQuery, offerText, profiles);
+  const queryTokens = tokens(normalizedQuery);
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
-  const coreHits = coreTokens.filter((term) => offerText.includes(term)).length;
-  if (coreHits < Math.max(1, coreTokens.length - 1)) return -999;
+  const offerTokens = tokens(offerText);
+  const exactCoreHits = coreTokens.filter((term) => offerTokens.includes(term)).length;
+  const exactRequirement = Math.max(1, coreTokens.length - 1);
+  const fuzzyCoreCoverage = fuzzyQueryCoverage(coreTokens.join(" "), offerText);
+  if (exactCoreHits < exactRequirement && fuzzyCoreCoverage < 0.78) return -999;
 
   const requestedMeasure = parseMeasure(query);
   const offeredMeasure = parseMeasure(store.size || store.productName);
   if (requestedMeasure && offeredMeasure && requestedMeasure.kind !== offeredMeasure.kind) return -999;
 
-  let score = scoreProduct(query, product, profiles) + coreHits * 3;
+  let score = scoreProduct(query, product, profiles)
+    + exactCoreHits * 3
+    + (fuzzyCoreCoverage > exactCoreHits / Math.max(coreTokens.length, 1) ? fuzzyCoreCoverage * 1.5 : 0);
   if (requestedMeasure && offeredMeasure) {
     const ratio = offeredMeasure.amount / requestedMeasure.amount;
     if (Math.abs(1 - ratio) < 0.01) score += 5;
@@ -227,7 +614,33 @@ export function categoryFamily(value: string | undefined | null) {
   if (/\b(?:dairy|milk|eggs?)\b/.test(category)) return "dairy";
   if (/\b(?:bakery|bread)\b/.test(category)) return "bakery";
   if (/\b(?:pantry|food cupboard)\b/.test(category)) return "pantry";
+  if (/\b(?:fruit|vegetables?|produce)\b/.test(category)) return "produce";
+  if (/\b(?:beverages?|drinks?)\b/.test(category)) return "beverages";
+  if (/\b(?:frozen|freezer)\b/.test(category)) return "frozen food";
+  if (/\b(?:cleaning|household|laundry)\b/.test(category)) return "household";
+  if (/\b(?:personal care|health|beauty|toiletries)\b/.test(category)) return "personal care";
+  if (/\b(?:baby|infant)\b/.test(category)) return "baby";
+  if (/\b(?:pet|dog|cat)\b/.test(category)) return "pet";
   return category;
+}
+
+export function inferredCategoryFamily(text: string) {
+  const normalized = clean(text);
+  if (/\b(?:milk|cheese|butter|yogh?urt|cream|eggs?)\b/.test(normalized)) return "dairy";
+  if (/\b(?:bread|rolls?|buns?|croissants?|wraps?)\b/.test(normalized)) return "bakery";
+  if (/\b(?:beef|chicken|pork|lamb|turkey|venison|mince|steak|boerewors|seafood|fish|braai|barbecue)\b/.test(normalized)) return "meat";
+  if (/\b(?:apples?|bananas?|potatoes|onions?|vegetables?|fruit|mushrooms?|butternut)\b/.test(normalized)) return "produce";
+  if (/\b(?:juice|coffee|tea|cooldrink|soft drink|water)\b/.test(normalized)) return "beverages";
+  if (/\b(?:flour|sugar|rice|pasta|cereal|sauce|spices?|oil|peanut butter)\b/.test(normalized)) return "pantry";
+  if (/\b(?:toothpaste|shampoo|soap|deodorant|lotion|toiletries)\b/.test(normalized)) return "personal care";
+  if (/\b(?:detergent|washing powder|dishwashing|bleach|toilet tissue|cleaner)\b/.test(normalized)) return "household";
+  return "";
+}
+
+function resolvedCategoryFamily(category: string | undefined | null, text = "") {
+  const family = categoryFamily(category);
+  if (family && !["groceries", "grocery", "food", "all products", "uncategorized", "other"].includes(family)) return family;
+  return inferredCategoryFamily(text) || family;
 }
 
 function isStoreEligible(query: string, productCategory: string | undefined, store: { productName: string; brand?: string; size?: string }, profiles: SearchProfileRow[]) {
@@ -236,12 +649,13 @@ function isStoreEligible(query: string, productCategory: string | undefined, sto
   const offeredMeasure = parseMeasure(store.size || store.productName);
   if (requestedMeasure && !offeredMeasure) return false;
   if (requestedMeasure && offeredMeasure && requestedMeasure.kind !== offeredMeasure.kind) return false;
-  const profile = profiles
-    .filter((entry) => normalizedQuery.includes(clean(entry.term)))
-    .sort((a, b) => clean(b.term).length - clean(a.term).length)[0];
-  if (!profile) return true;
-  if (profile.category && productCategory && categoryFamily(profile.category) !== categoryFamily(productCategory)) return false;
   const offerText = clean([store.productName, store.brand, store.size].join(" "));
+  if (!compareCharacteristics(normalizedQuery, offerText).valid) return false;
+  const profile = matchingProfile(normalizedQuery, offerText, profiles);
+  if (!profile) return true;
+  if (profile.category
+    && resolvedCategoryFamily(productCategory, offerText)
+    && categoryFamily(profile.category) !== resolvedCategoryFamily(productCategory, offerText)) return false;
   if (!matchesSearchTerm(offerText, profile.term)) return false;
   const hasExcludedTerm = parseJsonArray(profile.exclude_terms_json).some((term) => {
     const excluded = clean(term);
@@ -367,11 +781,8 @@ function includesPhrase(text: string, phrase: string) {
 
 export function matchesSearchTerm(text: string, term: string) {
   const normalizedTerm = clean(term);
-  const variants = new Set([normalizedTerm]);
-  if (normalizedTerm.endsWith("s")) variants.add(normalizedTerm.slice(0, -1));
-  if (normalizedTerm === "yoghurt") variants.add("yogurt");
-  if (normalizedTerm === "yogurt") variants.add("yoghurt");
-  return [...variants].some((variant) => includesPhrase(text, variant));
+  if (includesPhrase(text, normalizedTerm)) return true;
+  return fuzzyQueryCoverage(normalizedTerm, text) >= 0.78;
 }
 
 function eggSize(text: string) {
@@ -420,10 +831,17 @@ function processedMinceTerms(text: string) {
     "seasoning",
     "dog food",
     "cat food",
+    "pet food",
+    "pet mince",
   ].filter((term) => includesPhrase(normalized, term));
 }
 
 export function compareCharacteristics(referenceText: string, offerText: string) {
+  if (includesPhrase(referenceText, "sensitive")
+    && !includesPhrase(offerText, "sensitive")
+    && !includesPhrase(offerText, "hypoallergenic")) {
+    return { valid: false, matches: 0 };
+  }
   const requestedEggSize = eggSize(referenceText);
   if (requestedEggSize && eggSize(offerText) !== requestedEggSize) {
     return { valid: false, matches: 0 };
@@ -483,10 +901,25 @@ export function sizeCompatibility(targetText: string, offerText: string) {
 }
 
 function matchingProfile(query: string, referenceText: string, profiles: SearchProfileRow[]) {
-  const combined = `${stripRetailerAliases(query)} ${stripRetailerAliases(referenceText)}`;
+  const normalizedQuery = stripRetailerAliases(query);
+  const normalizedReference = stripRetailerAliases(referenceText);
   return profiles
-    .filter((profile) => includesPhrase(combined, profile.term))
-    .sort((left, right) => clean(right.term).length - clean(left.term).length)[0];
+    .map((profile) => {
+      const profileTerm = clean(profile.term);
+      const queryCoverage = fuzzyQueryCoverage(profileTerm, normalizedQuery);
+      const referenceCoverage = fuzzyQueryCoverage(profileTerm, normalizedReference);
+      const exactBonus = includesPhrase(normalizedQuery, profileTerm) ? 2 : 0;
+      const lengthBonus = Math.min(tokens(profileTerm).length, 4) * 0.08;
+      return {
+        profile,
+        queryCoverage,
+        score: queryCoverage + referenceCoverage * 0.12 + exactBonus + lengthBonus,
+      };
+    })
+    .filter((entry) => entry.queryCoverage >= 0.82)
+    .sort((left, right) =>
+      right.score - left.score
+      || clean(right.profile.term).length - clean(left.profile.term).length)[0]?.profile;
 }
 
 function withoutBrand(text: string, brand: string | undefined) {
@@ -539,7 +972,8 @@ async function findClosestBasketMatches(
   const comparisonQuery = stripRetailerAliases(String(item.comparisonQuery || item.query || item.name || ""));
   const referenceText = withoutBrand(String(item.selectedProductName || item.name || comparisonQuery), item.selectedBrand);
   const profile = matchingProfile(comparisonQuery, referenceText, profiles);
-  const targetCategory = categoryFamily(item.category || profile?.category || "");
+  const targetCategory = resolvedCategoryFamily(item.category, `${comparisonQuery} ${referenceText}`)
+    || categoryFamily(profile?.category || "");
   const profileTerms = tokens(profile?.term || "");
   const queryTerms = tokens(comparisonQuery).filter((term) =>
     !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
@@ -586,7 +1020,8 @@ async function findClosestBasketMatches(
       .filter((row) => isOfferVisibleAtLocation(row, location))
       .map((row) => {
         const store = offerToStore(row, location);
-        if (targetCategory && row.category && categoryFamily(row.category) !== targetCategory) return null;
+        const rowCategory = resolvedCategoryFamily(row.category, `${row.canonical_name} ${row.search_text}`);
+        if (targetCategory && rowCategory && rowCategory !== targetCategory) return null;
         if (store.price == null || !isStoreEligible(comparisonQuery, row.category || undefined, store, profiles)) return null;
         const offerText = clean([store.productName, store.brand, store.size, row.canonical_name, row.search_text].join(" "));
         const characteristics = compareCharacteristics(`${comparisonQuery} ${referenceText}`, offerText);
@@ -596,7 +1031,7 @@ async function findClosestBasketMatches(
         const baseScore = scoreStore(comparisonQuery, row, store, profiles);
         if (baseScore <= 0) return null;
         const descriptorHits = descriptorTokens.filter((term) => offerText.includes(term)).length;
-        const categoryScore = !targetCategory || categoryFamily(row.category) === targetCategory ? 100 : 0;
+        const categoryScore = !targetCategory || rowCategory === targetCategory ? 100 : 0;
         const selectedProductBonus = item.selectedProductId === row.id ? 20 : 0;
         const matchScore = categoryScore
           + baseScore * 5
@@ -627,8 +1062,10 @@ async function findCatalogue(
   pageSize: number,
   location?: ShopperLocation,
   perRetailer = 0,
+  debug = false,
 ) {
   query = stripRetailerAliases(query);
+  const safetyQuery = semanticSafetyQuery(query);
   const queryTokens = tokens(query);
   if (!queryTokens.length) return { products: [], retailerMatches: [], hasMore: false };
 
@@ -650,16 +1087,55 @@ async function findCatalogue(
      GROUP BY p.id
      LIMIT 120`,
   ).bind(retailer.id, ...strictTerms.map((term) => `%${term}%`)).all<ProductRow>());
-  const [{ results: strictResults }, { results: profiles }, ...retailerResults] = await Promise.all([
-    strictStatement.all<ProductRow>(),
-    env.DB.prepare(
-      "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
-    ).all<SearchProfileRow>(),
-    ...retailerStatements,
+  const [initialResults, semanticCandidates] = await Promise.all([
+    Promise.all([
+      strictStatement.all<ProductRow>(),
+      env.DB.prepare(
+        "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
+      ).all<SearchProfileRow>(),
+      ...retailerStatements,
+    ]),
+    findSemanticProductCandidates(env, query),
   ]);
+  const [{ results: strictResults }, { results: profiles }, ...retailerResults] = initialResults;
   const strictById = new Map(strictResults.map((product) => [product.id, product]));
   for (const retailerResult of retailerResults) {
     for (const product of retailerResult.results) strictById.set(product.id, product);
+  }
+  const semanticIds = semanticCandidates.map((candidate) => candidate.productId);
+  if (semanticIds.length) {
+    const placeholders = semanticIds.map(() => "?").join(",");
+    const semanticProducts = await env.DB.prepare(
+      `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
+       FROM catalogue_products WHERE id IN (${placeholders})`,
+    ).bind(...semanticIds).all<ProductRow>();
+    for (const product of semanticProducts.results) strictById.set(product.id, product);
+  }
+  const fuzzyProfile = matchingProfile(query, query, profiles);
+  const profileTerms = tokens(fuzzyProfile?.term || "");
+  const profileLookupDiffers = profileTerms.length
+    && profileTerms.join("|") !== strictTerms.join("|");
+  if (profileLookupDiffers) {
+    const profileClauses = profileTerms.map(() => "search_text LIKE ?").join(" AND ");
+    const profileBindings = profileTerms.map((term) => `%${term}%`);
+    const profileStatements = [
+      env.DB.prepare(
+        `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
+         FROM catalogue_products WHERE ${profileClauses} LIMIT 350`,
+      ).bind(...profileBindings).all<ProductRow>(),
+      ...retailers.map((retailer) => env.DB.prepare(
+        `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
+         FROM catalogue_products p
+         JOIN catalogue_offers o ON o.product_id = p.id
+         WHERE o.retailer_id = ? AND ${profileTerms.map(() => "p.search_text LIKE ?").join(" AND ")}
+         GROUP BY p.id
+         LIMIT 160`,
+      ).bind(retailer.id, ...profileBindings).all<ProductRow>()),
+    ];
+    const profileResults = await Promise.all(profileStatements);
+    for (const result of profileResults) {
+      for (const product of result.results) strictById.set(product.id, product);
+    }
   }
   let results = [...strictById.values()];
   if (queryTokens.length > 1) {
@@ -672,8 +1148,26 @@ async function findCatalogue(
     for (const product of broad.results) strictById.set(product.id, product);
     results = [...strictById.values()];
   }
+  const lexicalCandidates = results
+    .map((product) => ({
+      productId: product.id,
+      lexicalScore: Math.max(0, scoreProduct(query, product, profiles)),
+    }))
+    .filter((candidate) => candidate.lexicalScore > 0);
+  const hybridCandidates = mergeHybridCandidates(lexicalCandidates, semanticCandidates);
+  const hybridById = new Map(hybridCandidates.map((candidate) => [candidate.productId, candidate]));
   const scored = results
-    .map((product) => ({ product, score: scoreProduct(query, product, profiles) }))
+    .map((product) => {
+      const candidate = hybridById.get(product.id);
+      const lexicalScore = candidate?.lexicalScore || 0;
+      const semanticScore = candidate?.semanticScore || 0;
+      return {
+        product,
+        score: lexicalScore > 0
+          ? lexicalScore + semanticScoreBonus(semanticScore)
+          : semanticScore,
+      };
+    })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.product.canonical_name.localeCompare(b.product.canonical_name));
 
@@ -716,18 +1210,31 @@ async function findCatalogue(
   const rankedMatches = retailers.flatMap((retailer) => materialized
       .flatMap((product) => product.stores
         .filter((store) => store.storeId === retailer.id && store.price != null)
-        .filter((store) => isStoreEligible(query, product.category, store, profiles))
+        .filter((store) => semanticCandidatePassesHardRules(query, {
+          id: product.id,
+          canonical_name: product.canonicalName,
+          category: product.category || null,
+          target_size: product.targetSize || null,
+          search_terms_json: JSON.stringify(product.searchTerms || []),
+          search_text: clean([product.canonicalName, product.category, product.targetSize, ...(product.searchTerms || [])].join(" ")),
+        }, store, profiles))
         .map((store) => ({
           product,
           store,
-          matchScore: scoreStore(query, {
-            id: product.id,
-            canonical_name: product.canonicalName,
-            category: product.category || null,
-            target_size: product.targetSize || null,
-            search_terms_json: JSON.stringify(product.searchTerms || []),
-            search_text: clean([product.canonicalName, product.category, product.targetSize, ...(product.searchTerms || [])].join(" ")),
-          }, store, profiles),
+          matchScore: (() => {
+            const row = {
+              id: product.id,
+              canonical_name: product.canonicalName,
+              category: product.category || null,
+              target_size: product.targetSize || null,
+              search_terms_json: JSON.stringify(product.searchTerms || []),
+              search_text: clean([product.canonicalName, product.category, product.targetSize, ...(product.searchTerms || [])].join(" ")),
+            };
+            const lexicalStoreScore = scoreStore(safetyQuery, row, store, profiles);
+            const semanticScore = hybridById.get(product.id)?.semanticScore || 0;
+            if (lexicalStoreScore > 0) return lexicalStoreScore + semanticScoreBonus(semanticScore);
+            return semanticScore >= MIN_SEMANTIC_SIMILARITY ? semanticScore : -999;
+          })(),
           comparableValue: comparableStoreValue(query, product, store),
         }))))
     .filter((entry) => entry.matchScore > 0)
@@ -777,6 +1284,10 @@ async function findCatalogue(
       retailerMatches: groupedMatches,
       retailerHasMore,
       hasMore: false,
+      ...(debug ? {
+        semanticSearchApplied: semanticCandidates.length > 0,
+        semanticCandidateCount: semanticCandidates.length,
+      } : {}),
     };
   }
   const start = (page - 1) * pageSize;
@@ -785,25 +1296,221 @@ async function findCatalogue(
     products: pageMatches,
     retailerMatches: pageMatches,
     hasMore: retailerMatches.length > start + pageSize,
+    ...(debug ? {
+      semanticSearchApplied: semanticCandidates.length > 0,
+      semanticCandidateCount: semanticCandidates.length,
+    } : {}),
   };
 }
 
 async function catalogueResponse(request: Request, env: Env, url: URL) {
   const query = (url.searchParams.get("q") || "").trim();
+  const correctionEnabled = url.searchParams.get("correct") !== "false";
   const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "10", 10) || 10));
   const perRetailer = Math.min(12, Math.max(0, Number.parseInt(url.searchParams.get("perRetailer") || "0", 10) || 0));
+  const debug = url.searchParams.get("debug") === "true" || url.searchParams.get("debug") === "1";
   const location = validLocation({ latitude: url.searchParams.get("latitude"), longitude: url.searchParams.get("longitude") });
-  const result = await findCatalogue(env, query, page, pageSize, location, perRetailer);
+  const correction = await correctCatalogueQuery(env, query, correctionEnabled);
+  const result = await findCatalogue(env, correction.correctedQuery, page, pageSize, location, perRetailer, debug);
   return json(request, env, {
     ok: true,
     query,
+    correctedQuery: correction.correctedQuery,
+    correctionApplied: correction.correctionApplied,
     page,
     pageSize,
     perRetailer: perRetailer || undefined,
     locationApplied: Boolean(location),
     ...result,
   });
+}
+
+async function sha256Hex(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function embeddingContentHash(text: string) {
+  return sha256Hex(`${PRODUCT_EMBEDDING_MODEL}\n${PRODUCT_EMBEDDING_POOLING}\n${text}`);
+}
+
+async function authorizedVectorIndexRequest(request: Request, env: Env) {
+  if (!env.VECTOR_INDEX_TOKEN) return false;
+  const authorization = request.headers.get("authorization") || "";
+  const supplied = authorization.replace(/^Bearer\s+/i, "");
+  if (!supplied) return false;
+  const [suppliedHash, expectedHash] = await Promise.all([
+    sha256Hex(supplied),
+    sha256Hex(env.VECTOR_INDEX_TOKEN),
+  ]);
+  return suppliedHash === expectedHash;
+}
+
+async function withRetries<T>(operation: () => Promise<T>, attempts = 3) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 300));
+      }
+    }
+  }
+  throw lastError;
+}
+
+function splitAggregatedValues(value: string | null) {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    if (Array.isArray(parsed)) {
+      return sortedUniqueCleanValues(parsed.filter((entry) => entry != null).map(String), 20);
+    }
+  } catch {
+    // Older local SQLite builds may return a normal GROUP_CONCAT value.
+  }
+  return sortedUniqueCleanValues(String(value || "").split(","), 20);
+}
+
+async function indexProductVectorsResponse(request: Request, env: Env) {
+  if (!env.VECTOR_INDEX_TOKEN) {
+    return json(request, env, { ok: false, error: "Vector indexing is not configured." }, 503);
+  }
+  if (!await authorizedVectorIndexRequest(request, env)) {
+    return json(request, env, { ok: false, error: "Unauthorized" }, 401);
+  }
+  const body = await request.json<{
+    cursor?: string;
+    limit?: number;
+    force?: boolean;
+  }>().catch(() => ({} as {
+    cursor?: string;
+    limit?: number;
+    force?: boolean;
+  }));
+  const cursor = String(body.cursor || "").trim();
+  const limit = Math.min(VECTOR_INDEX_BATCH_SIZE, Math.max(1, Number(body.limit) || VECTOR_INDEX_BATCH_SIZE));
+  const force = Boolean(body.force);
+  const [{ results: products }, { results: profiles }] = await Promise.all([
+    env.DB.prepare(
+      `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text,
+              json_group_array(DISTINCT o.brand) AS brands,
+              json_group_array(DISTINCT o.product_name) AS retailer_names
+       FROM catalogue_products p
+       LEFT JOIN catalogue_offers o ON o.product_id = p.id
+       WHERE p.id > ?1
+       GROUP BY p.id
+       ORDER BY p.id
+       LIMIT ?2`,
+    ).bind(cursor, limit).all<EmbeddingProductRow>(),
+    env.DB.prepare(
+      "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
+    ).all<SearchProfileRow>(),
+  ]);
+
+  if (!products.length) {
+    return json(request, env, {
+      ok: true,
+      processed: 0,
+      indexed: 0,
+      skipped: 0,
+      failed: 0,
+      nextCursor: null,
+      done: true,
+    });
+  }
+
+  const prepared = await Promise.all(products.map(async (product) => {
+    const embeddingText = buildProductEmbeddingText(product, {
+      brands: splitAggregatedValues(product.brands),
+      retailerNames: splitAggregatedValues(product.retailer_names),
+      profiles,
+    });
+    return {
+      product,
+      embeddingText,
+      embeddingHash: await embeddingContentHash(embeddingText),
+    };
+  }));
+  const productIds = prepared.map((entry) => entry.product.id);
+  const placeholders = productIds.map(() => "?").join(",");
+  const statuses = await env.DB.prepare(
+    `SELECT product_id, embedding_hash, embedding_model
+     FROM product_embedding_status WHERE product_id IN (${placeholders})`,
+  ).bind(...productIds).all<{
+    product_id: string;
+    embedding_hash: string;
+    embedding_model: string;
+  }>();
+  const statusById = new Map(statuses.results.map((status) => [status.product_id, status]));
+  const changed = prepared.filter((entry) => {
+    if (force) return true;
+    const status = statusById.get(entry.product.id);
+    return !status
+      || status.embedding_hash !== entry.embeddingHash
+      || status.embedding_model !== PRODUCT_EMBEDDING_MODEL;
+  });
+
+  let indexed = 0;
+  let failed = 0;
+  if (changed.length) {
+    try {
+      const embeddingResponse = await withRetries(() => env.AI.run(PRODUCT_EMBEDDING_MODEL, {
+        text: changed.map((entry) => entry.embeddingText),
+        pooling: PRODUCT_EMBEDDING_POOLING,
+      }));
+      const vectors = embeddingVectors(embeddingResponse);
+      if (vectors.length !== changed.length
+        || vectors.some((vector) => vector.length !== PRODUCT_EMBEDDING_DIMENSIONS)) {
+        throw new Error("Workers AI returned an unexpected embedding shape.");
+      }
+      await withRetries(() => env.PRODUCT_VECTORS.upsert(changed.map((entry, index) => ({
+        id: entry.product.id,
+        values: vectors[index],
+        metadata: {
+          productId: entry.product.id,
+          category: clean(entry.product.category),
+          categoryFamily: resolvedCategoryFamily(
+            entry.product.category,
+            `${entry.product.canonical_name} ${entry.product.search_text}`,
+          ),
+          measureKind: parseMeasure(entry.product.target_size || "")?.kind || "",
+        },
+      }))));
+      const embeddedAt = new Date().toISOString();
+      await env.DB.batch(changed.map((entry) => env.DB.prepare(
+        `INSERT INTO product_embedding_status
+          (product_id, embedding_hash, embedding_model, embedded_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(product_id) DO UPDATE SET
+           embedding_hash = excluded.embedding_hash,
+           embedding_model = excluded.embedding_model,
+           embedded_at = excluded.embedded_at`,
+      ).bind(entry.product.id, entry.embeddingHash, PRODUCT_EMBEDDING_MODEL, embeddedAt)));
+      indexed = changed.length;
+    } catch (error) {
+      failed = changed.length;
+      console.error("Product vector indexing batch failed.", error);
+    }
+  }
+
+  const done = products.length < limit;
+  return json(request, env, {
+    ok: failed === 0,
+    processed: products.length,
+    indexed,
+    skipped: products.length - changed.length,
+    failed,
+    nextCursor: done ? null : products.at(-1)?.id || null,
+    done,
+    model: PRODUCT_EMBEDDING_MODEL,
+    dimensions: PRODUCT_EMBEDDING_DIMENSIONS,
+  }, failed ? 502 : 200);
 }
 
 async function categoriesResponse(request: Request, env: Env) {
@@ -1042,7 +1749,7 @@ async function scanBasket(request: Request, env: Env) {
       String(item.comparisonQuery || item.query || item.name || "").trim(),
       item.selectedBrand,
     );
-    const quantity = Math.max(0.01, Number(item.quantity || 1));
+    const quantity = Math.max(1, Math.round(Number(item.quantity || 1)));
     const closestMatches = query
       ? await findClosestBasketMatches(env, item, enabledRetailers, profiles, location)
       : new Map<string, {
@@ -1125,17 +1832,96 @@ async function scanBasket(request: Request, env: Env) {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-    const url = new URL(request.url);
-    if (request.method === "GET" && ["/v1/health", "/health"].includes(url.pathname)) {
-      return json(request, env, { ok: true, service: "randbasket-api", now: new Date().toISOString() });
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders(request, env),
+      });
     }
-    if (request.method === "GET" && ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)) return catalogueResponse(request, env, url);
-    if (request.method === "GET" && ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(url.pathname)) return categoriesResponse(request, env);
-    if (request.method === "GET" && ["/v1/specials", "/api/specials"].includes(url.pathname)) return specialsResponse(request, env, url);
-    if (request.method === "POST" && ["/v1/catalogue/request", "/api/catalogue/request"].includes(url.pathname)) return queueRequest(request, env);
-    if (request.method === "POST" && ["/v1/feedback", "/api/feedback"].includes(url.pathname)) return submitFeedback(request, env);
-    if (request.method === "POST" && ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)) return scanBasket(request, env);
-    return json(request, env, { ok: false, error: "Not found" }, 404);
+
+    const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/") {
+      return json(request, env, {
+        ok: true,
+        service: "randbasket-api",
+        message: "RandBasket API is online.",
+        endpoints: {
+          health: "/v1/health",
+          catalogue: "/v1/catalogue?q=milk",
+          categories: "/v1/catalogue/categories",
+          specials: "/v1/specials",
+        },
+      });
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/health", "/health"].includes(url.pathname)
+    ) {
+      return json(request, env, {
+        ok: true,
+        service: "randbasket-api",
+        now: new Date().toISOString(),
+      });
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/admin/vector-index"
+    ) {
+      return indexProductVectorsResponse(request, env);
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/catalogue", "/api/catalogue"].includes(url.pathname)
+    ) {
+      return catalogueResponse(request, env, url);
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/catalogue/categories", "/api/catalogue/categories"].includes(
+        url.pathname,
+      )
+    ) {
+      return categoriesResponse(request, env);
+    }
+
+    if (
+      request.method === "GET" &&
+      ["/v1/specials", "/api/specials"].includes(url.pathname)
+    ) {
+      return specialsResponse(request, env, url);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/catalogue/request", "/api/catalogue/request"].includes(
+        url.pathname,
+      )
+    ) {
+      return queueRequest(request, env);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/feedback", "/api/feedback"].includes(url.pathname)
+    ) {
+      return submitFeedback(request, env);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)
+    ) {
+      return scanBasket(request, env);
+    }
+
+    return json(request, env, {
+      ok: false,
+      error: "Not found",
+    }, 404);
   },
 };
