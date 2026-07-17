@@ -9,6 +9,7 @@ import {
   calculateBasketLineTotalCents,
   chooseVocabularyCorrection,
   compareCharacteristics,
+  findBalancedProductCandidates,
   findSemanticProductCandidates,
   fuzzyQueryCoverage,
   fuzzyTokenSimilarity,
@@ -394,5 +395,41 @@ assert.deepEqual(
   ["same-match-exact-size", "best-match", "cheap-poor"],
   "semantic quality and compatible pack size must rank ahead of price",
 );
+
+const balancedCalls = [];
+const balancedProducts = await findBalancedProductCandidates({
+  DB: {
+    prepare(sql) {
+      const call = { sql, bindings: [] };
+      balancedCalls.push(call);
+      return {
+        bind(...bindings) {
+          call.bindings = bindings;
+          return {
+            async all() {
+              return {
+                results: [
+                  { id: "milk-a", canonical_name: "Milk A", category: "Dairy", target_size: "2 L", search_terms_json: "[]", search_text: "milk a" },
+                  { id: "milk-a", canonical_name: "Milk A", category: "Dairy", target_size: "2 L", search_terms_json: "[]", search_text: "milk a" },
+                  { id: "milk-b", canonical_name: "Milk B", category: "Dairy", target_size: "2 L", search_terms_json: "[]", search_text: "milk b" },
+                ],
+              };
+            },
+          };
+        },
+      };
+    },
+  },
+}, ["full", "cream", "milk"], [
+  { id: "pick-n-pay", name: "Pick n Pay" },
+  { id: "checkers", name: "Checkers" },
+], { matchAll: true, limitPerRetailer: 24 });
+assert.equal(balancedCalls.length, 1, "balanced matching must use one D1 statement");
+assert.match(balancedCalls[0].sql, /UNION ALL/, "retailer candidates should be combined in D1");
+assert.deepEqual(balancedCalls[0].bindings, [
+  "pick-n-pay", "%full%", "%cream%", "%milk%",
+  "checkers", "%full%", "%cream%", "%milk%",
+]);
+assert.deepEqual(balancedProducts.map((product) => product.id), ["milk-a", "milk-b"]);
 
 console.log("Catalogue comparison matching tests passed.");

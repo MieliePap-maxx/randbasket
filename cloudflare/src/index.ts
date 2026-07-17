@@ -1102,6 +1102,37 @@ export function sortClosestCandidates<T extends RankedComparisonCandidate>(candi
     || left.price - right.price);
 }
 
+export async function findBalancedProductCandidates(
+  env: Env,
+  searchTerms: string[],
+  targetRetailers: typeof retailers,
+  options: { matchAll?: boolean; limitPerRetailer?: number } = {},
+) {
+  const terms = [...new Set(searchTerms.filter(Boolean))].slice(0, 8);
+  if (!terms.length || !targetRetailers.length) return [] as ProductRow[];
+  const operator = options.matchAll === false ? " OR " : " AND ";
+  const limit = Math.min(120, Math.max(1, Math.round(options.limitPerRetailer || 70)));
+  const bindings: unknown[] = [];
+  const retailerQueries = targetRetailers.map((retailer) => {
+    bindings.push(retailer.id, ...terms.map((term) => `%${term}%`));
+    const searchClauses = terms.map(() => "p.search_text LIKE ?").join(operator);
+    return `SELECT * FROM (
+      SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
+      FROM catalogue_products p
+      JOIN catalogue_offers o ON o.product_id = p.id
+      WHERE o.retailer_id = ? AND (${searchClauses})
+      GROUP BY p.id
+      LIMIT ${limit}
+    )`;
+  });
+  const { results } = await env.DB.prepare(retailerQueries.join(" UNION ALL "))
+    .bind(...bindings)
+    .all<ProductRow>();
+  const unique = new Map<string, ProductRow>();
+  for (const product of results) unique.set(product.id, product);
+  return [...unique.values()];
+}
+
 async function findClosestBasketMatches(
   env: Env,
   item: BasketItem,
@@ -1123,43 +1154,45 @@ async function findClosestBasketMatches(
     !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
     && !/^\d+(?:\.\d+)?$/.test(term));
   const discoveryTerms = profileTerms.length ? profileTerms : queryTerms;
-  if (!discoveryTerms.length) return new Map<string, ClosestBasketMatch>();
+  if (!discoveryTerms.length || !enabledRetailers.length) return new Map<string, ClosestBasketMatch>();
 
   const descriptorTokens = importantDescriptorTokens(referenceText, profile);
-  const statements = enabledRetailers.map((retailer) => {
-    const searchClauses = discoveryTerms
-      .map(() => "(p.search_text LIKE ? OR LOWER(o.product_name) LIKE ?)")
-      .join(" OR ");
-    const rankTerms = [...new Set([...queryTerms, ...descriptorTokens])].slice(0, 12);
-    const rankExpression = rankTerms.length
-      ? rankTerms
-        .map(() => "(CASE WHEN p.search_text LIKE ? OR LOWER(o.product_name) LIKE ? THEN 1 ELSE 0 END)")
-        .join(" + ")
-      : "0";
-    const bindings: unknown[] = [retailer.id];
-    for (const term of discoveryTerms) bindings.push(`%${term}%`, `%${term}%`);
-    for (const term of rankTerms) bindings.push(`%${term}%`, `%${term}%`);
-    return env.DB.prepare(
-      `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text,
-              o.product_id, o.retailer_id, o.retailer_name, o.product_name, o.brand, o.size_label,
-              o.unit_label, o.price_cents, o.regular_price_cents, o.normalized_price_cents,
-              o.promo_text, o.promo_type, o.promo_applied, o.image_url, o.product_url,
-              o.location_key, o.store_code, o.store_display_name, o.latitude, o.longitude, o.last_seen_at
-       FROM catalogue_products p
-       JOIN catalogue_offers o ON o.product_id = p.id
-       WHERE o.retailer_id = ? AND (${searchClauses})
-       ORDER BY ${rankExpression} DESC, o.last_seen_at DESC
-       LIMIT 700`,
-    ).bind(...bindings).all<ProductRow & OfferRow>();
+  // Discover products once, then use the indexed product_id/retailer_id offer
+  // lookups below. The previous implementation repeated a wildcard JOIN for
+  // every retailer and could exceed the Worker CPU limit on common searches.
+  const candidateProducts = await findBalancedProductCandidates(env, discoveryTerms, enabledRetailers, {
+    matchAll: false,
+    limitPerRetailer: 70,
   });
-  const retailerResults = await Promise.all(statements);
+  if (!candidateProducts.length) return new Map<string, ClosestBasketMatch>();
+
+  const productsById = new Map(candidateProducts.map((product) => [product.id, product]));
+  const retailerIds = enabledRetailers.map((retailer) => retailer.id);
+  const offersByRetailer = new Map(retailerIds.map((retailerId) => [retailerId, [] as OfferRow[]]));
+  for (let start = 0; start < candidateProducts.length; start += 75) {
+    const productIds = candidateProducts.slice(start, start + 75).map((product) => product.id);
+    const retailerPlaceholders = retailerIds.map(() => "?").join(",");
+    const productPlaceholders = productIds.map(() => "?").join(",");
+    const { results: offers } = await env.DB.prepare(
+      `SELECT product_id, retailer_id, retailer_name, product_name, brand, size_label, unit_label,
+              price_cents, regular_price_cents, normalized_price_cents, promo_text, promo_type,
+              promo_applied, image_url, product_url, location_key, store_code, store_display_name,
+              latitude, longitude, last_seen_at
+       FROM catalogue_offers
+       WHERE retailer_id IN (${retailerPlaceholders})
+         AND product_id IN (${productPlaceholders})`,
+    ).bind(...retailerIds, ...productIds).all<OfferRow>();
+    for (const offer of offers) offersByRetailer.get(offer.retailer_id)?.push(offer);
+  }
   const matches = new Map<string, ClosestBasketMatch>();
 
-  enabledRetailers.forEach((retailer, retailerIndex) => {
-    const ranked = retailerResults[retailerIndex].results
-      .filter((row) => isOfferVisibleAtLocation(row, location))
-      .map((row) => {
-        const store = offerToStore(row, location);
+  enabledRetailers.forEach((retailer) => {
+    const ranked = (offersByRetailer.get(retailer.id) || [])
+      .filter((offer) => isOfferVisibleAtLocation(offer, location))
+      .map((offer) => {
+        const row = productsById.get(offer.product_id);
+        if (!row) return null;
+        const store = offerToStore(offer, location);
         const rowCategory = resolvedCategoryFamily(row.category, `${row.canonical_name} ${row.search_text}`);
         if (targetCategory && rowCategory && rowCategory !== targetCategory) return null;
         if (store.price == null || !isStoreEligible(comparisonQuery, row.category || undefined, store, profiles)) return null;
@@ -1223,35 +1256,21 @@ async function findCatalogue(
   // size or product title differently. Fine ranking happens in the Worker.
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
   const strictTerms = coreTokens.length ? coreTokens : queryTokens;
-  const strictClauses = strictTerms.map(() => "search_text LIKE ?").join(" AND ");
-  const strictStatement = env.DB.prepare(
-    `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
-     FROM catalogue_products WHERE ${strictClauses} LIMIT 350`,
-  ).bind(...strictTerms.map((term) => `%${term}%`));
-  const retailerClauses = strictTerms.map(() => "p.search_text LIKE ?").join(" AND ");
-  const retailerStatements = retailers.map((retailer) => env.DB.prepare(
-    `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
-     FROM catalogue_products p
-     JOIN catalogue_offers o ON o.product_id = p.id
-     WHERE o.retailer_id = ? AND ${retailerClauses}
-     GROUP BY p.id
-     LIMIT 120`,
-  ).bind(retailer.id, ...strictTerms.map((term) => `%${term}%`)).all<ProductRow>());
-  const [initialResults, semanticCandidates] = await Promise.all([
-    Promise.all([
-      strictStatement.all<ProductRow>(),
-      env.DB.prepare(
-        "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
-      ).all<SearchProfileRow>(),
-      ...retailerStatements,
-    ]),
+  const candidateLimit = perRetailer > 0
+    ? Math.min(70, Math.max(24, perRetailer * 8))
+    : 70;
+  const [strictResults, profileResult, semanticCandidates] = await Promise.all([
+    findBalancedProductCandidates(env, strictTerms, retailers, {
+      matchAll: true,
+      limitPerRetailer: candidateLimit,
+    }),
+    env.DB.prepare(
+      "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
+    ).all<SearchProfileRow>(),
     findSemanticProductCandidates(env, query),
   ]);
-  const [{ results: strictResults }, { results: profiles }, ...retailerResults] = initialResults;
+  const profiles = profileResult.results;
   const strictById = new Map(strictResults.map((product) => [product.id, product]));
-  for (const retailerResult of retailerResults) {
-    for (const product of retailerResult.results) strictById.set(product.id, product);
-  }
   const semanticIds = semanticCandidates.map((candidate) => candidate.productId);
   if (semanticIds.length) {
     const placeholders = semanticIds.map(() => "?").join(",");
@@ -1266,36 +1285,23 @@ async function findCatalogue(
   const profileLookupDiffers = profileTerms.length
     && profileTerms.join("|") !== strictTerms.join("|");
   if (profileLookupDiffers) {
-    const profileClauses = profileTerms.map(() => "search_text LIKE ?").join(" AND ");
-    const profileBindings = profileTerms.map((term) => `%${term}%`);
-    const profileStatements = [
-      env.DB.prepare(
-        `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
-         FROM catalogue_products WHERE ${profileClauses} LIMIT 350`,
-      ).bind(...profileBindings).all<ProductRow>(),
-      ...retailers.map((retailer) => env.DB.prepare(
-        `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
-         FROM catalogue_products p
-         JOIN catalogue_offers o ON o.product_id = p.id
-         WHERE o.retailer_id = ? AND ${profileTerms.map(() => "p.search_text LIKE ?").join(" AND ")}
-         GROUP BY p.id
-         LIMIT 160`,
-      ).bind(retailer.id, ...profileBindings).all<ProductRow>()),
-    ];
-    const profileResults = await Promise.all(profileStatements);
-    for (const result of profileResults) {
-      for (const product of result.results) strictById.set(product.id, product);
-    }
+    const profileResults = await findBalancedProductCandidates(env, profileTerms, retailers, {
+      matchAll: true,
+      limitPerRetailer: 50,
+    });
+    for (const product of profileResults) strictById.set(product.id, product);
   }
   let results = [...strictById.values()];
-  if (queryTokens.length > 1) {
+  // Only pay for the broad wildcard pass when the strict pass did not already
+  // produce a useful candidate pool. This keeps common searches below the
+  // Worker CPU limit while retaining fuzzy recall for sparse queries.
+  if (queryTokens.length > 1 && strictById.size < 120) {
     const broadTerms = coreTokens.length ? coreTokens : queryTokens;
-    const broadClauses = broadTerms.map(() => "search_text LIKE ?").join(" OR ");
-    const broad = await env.DB.prepare(
-      `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
-       FROM catalogue_products WHERE ${broadClauses} LIMIT 350`,
-    ).bind(...broadTerms.map((term) => `%${term}%`)).all<ProductRow>();
-    for (const product of broad.results) strictById.set(product.id, product);
+    const broadResults = await findBalancedProductCandidates(env, broadTerms, retailers, {
+      matchAll: false,
+      limitPerRetailer: 40,
+    });
+    for (const product of broadResults) strictById.set(product.id, product);
     results = [...strictById.values()];
   }
   const lexicalCandidates = results
