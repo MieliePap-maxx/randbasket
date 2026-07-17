@@ -6,6 +6,7 @@ import {
   PRODUCT_EMBEDDING_MODEL,
   buildProductEmbeddingText,
   categoryFamily,
+  calculateBasketLineTotalCents,
   chooseVocabularyCorrection,
   compareCharacteristics,
   findSemanticProductCandidates,
@@ -17,13 +18,17 @@ import {
   mergeHybridCandidates,
   normalizeRetailerId,
   normaliseForTarget,
+  normalizedProductFamily,
+  parsePackageMeasure,
   parseMeasure,
+  planPackageFulfilment,
   scoreStore,
   semanticCandidatePassesHardRules,
   semanticScoreBonus,
   sizeCompatibility,
   sortClosestCandidates,
   stripRetailerAliases,
+  summarizeRetailerBasket,
 } from "../src/index.ts";
 
 function measure(value, expected) {
@@ -310,11 +315,46 @@ assert.equal(sizeCompatibility("2L", "1L").valid, true);
 assert.equal(sizeCompatibility("2L", "2L").score > sizeCompatibility("2L", "1L").score, true);
 assert.equal(sizeCompatibility("1kg", "2L").valid, false);
 assert.equal(normaliseForTarget(20, "1L", "2L"), 40);
-assert.equal(normaliseForTarget(75, "2.5kg", "1kg"), 30);
+assert.equal(normaliseForTarget(75, "2.5kg", "1kg"), null, "oversized packages must not be fractionally priced");
+assert.deepEqual(parsePackageMeasure("10 x 500 ml"), {
+  amount: 5000,
+  kind: "volume",
+  packageQuantity: 5000,
+  singleUnitAmount: 500,
+  multipackCount: 10,
+  normalizedUnit: "ml",
+});
+assert.equal(parsePackageMeasure("not a package"), null);
+assert.equal(planPackageFulfilment("2L", "1L").unitsRequired, 2);
+assert.equal(planPackageFulfilment("2L", "1L").totalSupplied, 2000);
+assert.equal(planPackageFulfilment("2L", "2L").score > planPackageFulfilment("2L", "1L").score, true);
+assert.equal(planPackageFulfilment("1kg", "2.5kg").valid, false);
+assert.equal(calculateBasketLineTotalCents(3499, 2, 3), 20994);
+assert.equal(calculateBasketLineTotalCents(null, 1, 1), null);
+assert.deepEqual(summarizeRetailerBasket([3499, 1799]), {
+  knownSubtotalCents: 5298,
+  knownSubtotal: 52.98,
+  matchedItemCount: 2,
+  missingItemCount: 0,
+  isComplete: true,
+});
+assert.deepEqual(summarizeRetailerBasket([3499, null]), {
+  knownSubtotalCents: 3499,
+  knownSubtotal: 34.99,
+  matchedItemCount: 1,
+  missingItemCount: 1,
+  isComplete: false,
+});
+assert.equal(normalizedProductFamily("Clover fresh full cream milk 2L"), "milk");
+assert.equal(normalizedProductFamily("Albany brown bread 700g"), "bread");
 
 validCharacteristics("full cream fresh milk 2L", "Clover fresh full cream milk 1L");
+validCharacteristics("full cream fresh milk 2L", "Housebrand full cream fresh milk 2L");
 invalidCharacteristics("full cream fresh milk 2L", "low fat fresh milk 2L");
 invalidCharacteristics("full cream fresh milk 2L", "full cream long life milk 2L");
+invalidCharacteristics("full cream fresh milk 2L", "full cream oat milk 2L");
+invalidCharacteristics("full cream fresh milk 2L", "chocolate full cream fresh milk 2L");
+invalidCharacteristics("lactose free full cream fresh milk 2L", "full cream fresh milk 2L");
 invalidCharacteristics("full cream fresh milk 2L", "fresh milk 2L");
 invalidCharacteristics("full cream fresh milk 2L", "full cream milk 2L");
 

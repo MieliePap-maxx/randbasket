@@ -13,7 +13,12 @@ const state = {
   autoScanTimer: null,
   scanInFlight: false,
   scanQueued: false,
+  catalogueQuery: "",
 };
+
+const { availableProductDetails, matchingBasketItem: findMatchingBasketItem, nextQuantity, wholeQuantity } = window.RandBasketCore;
+const quantityUpdates = new Set();
+let lastProductDetailsTrigger = null;
 
 const API_ORIGIN = "https://api.randbasket.co.za";
 const STORAGE_KEY = "randbasket-web-state-v1";
@@ -280,7 +285,7 @@ function itemRow(item) {
     <td class="item-name" data-label="Product"><div class="basket-product"><strong>${escapeHtml(item.name)}</strong>${details ? `<span>${escapeHtml(details)}</span>` : ""}</div></td>
     <td class="basket-store-cell" data-label="Retailer"><span class="basket-store">${escapeHtml(storeName)}</span></td>
     <td class="basket-price-cell" data-label="Price"><strong class="basket-price">${formatMoney(item.selectedPrice)}</strong></td>
-    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" min="0.1" step="0.1" value="${item.quantity || 1}" /></td>
+    <td class="quantity" data-label="Qty"><input data-field="quantity" aria-label="Quantity for ${escapeAttr(item.name)}" type="number" min="1" step="1" value="${wholeQuantity(item.quantity)}" /></td>
     <td class="remove" data-label="Remove"><button type="button" data-remove="${item.id}">Remove</button></td>
   `;
   return tr;
@@ -300,6 +305,124 @@ function renderItems() {
   state.items.forEach((item) => body.appendChild(itemRow(item)));
   $("#emptyBasket").hidden = state.items.length > 0;
   $(".table-wrap").hidden = state.items.length === 0;
+}
+
+function matchingBasketItem(store, product = null) {
+  return findMatchingBasketItem(state.items, product, store);
+}
+
+function productIdentity(product, store) {
+  return `${store.storeId}|${product?.id || ""}|${store.url || ""}`;
+}
+
+function productImageMarkup(imageUrl, productName, className, interactive = false) {
+  const initial = cleanDisplayText(productName).charAt(0).toUpperCase() || "R";
+  const image = imageUrl
+    ? `<img data-product-image src="${escapeAttr(imageUrl)}" alt="" loading="lazy" />`
+    : "";
+  const content = `<span class="product-image-fallback" aria-hidden="true">${escapeHtml(initial)}</span>${image}`;
+  return interactive
+    ? `<button type="button" class="${className} product-image-button" aria-label="${escapeAttr(`View details for ${productName}`)}">${content}</button>`
+    : `<span class="${className}">${content}</span>`;
+}
+
+function watchProductImages(root = document) {
+  root.querySelectorAll("img[data-product-image]").forEach((image) => {
+    image.addEventListener("error", () => { image.hidden = true; }, { once: true });
+  });
+}
+
+function quantityControlMarkup(existing, label, compact = false) {
+  if (!existing) {
+    return `<button type="button" class="catalogue-add-btn catalogue-item-control" aria-label="Add product to basket">Add to basket</button>`;
+  }
+  return `
+    <div class="quantity-stepper catalogue-item-control${compact ? " is-compact" : ""}" aria-label="${escapeAttr(`Quantity for ${label}`)}">
+      <button type="button" data-quantity-action="decrease" aria-label="Decrease quantity">&minus;</button>
+      <strong aria-label="Current quantity">${wholeQuantity(existing.quantity)}</strong>
+      <button type="button" data-quantity-action="increase" aria-label="Increase quantity">&plus;</button>
+    </div>
+  `;
+}
+
+async function adjustCatalogueProductQuantity(product, store, delta, preferredQuery = "") {
+  const key = productIdentity(product, store);
+  if (quantityUpdates.has(key)) return;
+  quantityUpdates.add(key);
+  try {
+    const existing = matchingBasketItem(store, product);
+    if (!existing && delta > 0) {
+      await addCatalogueProductToBasket(product, store, preferredQuery);
+      return;
+    }
+    if (!existing) return;
+    const quantity = nextQuantity(existing.quantity, delta);
+    if (quantity === 0) state.items = state.items.filter((item) => item.id !== existing.id);
+    else existing.quantity = quantity;
+    state.latest = null;
+    renderItems();
+    renderResults();
+    await saveAll();
+    renderCatalogueResults();
+    if (state.specialsLoaded) renderSpecials();
+    scheduleBasketScan(150);
+  } finally {
+    quantityUpdates.delete(key);
+  }
+}
+
+function wireQuantityControl(root, product, store, preferredQuery = "", onChange = null) {
+  const addButton = root.querySelector(".catalogue-add-btn");
+  addButton?.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await adjustCatalogueProductQuantity(product, store, 1, preferredQuery);
+    onChange?.();
+  });
+  root.querySelectorAll("[data-quantity-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      root.querySelectorAll(".catalogue-item-control button").forEach((control) => { control.disabled = true; });
+      const delta = button.dataset.quantityAction === "increase" ? 1 : -1;
+      await adjustCatalogueProductQuantity(product, store, delta, preferredQuery);
+      onChange?.();
+    });
+  });
+}
+
+function openProductDetails(product, store, comparison, trigger) {
+  const dialog = $("#productDetailsDialog");
+  const content = $("#productDetailsContent");
+  const details = availableProductDetails(
+    product,
+    store,
+    comparison ? `${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}` : null,
+  );
+  const productName = cleanDisplayText(details.name) || "Product";
+  const description = cleanDisplayText(details.description);
+  const retailerLink = details.productUrl
+    ? `<a class="primary product-details-link" href="${escapeAttr(details.productUrl)}" target="_blank" rel="noopener">View retailer product</a>`
+    : "";
+  content.innerHTML = `
+    <div class="product-details-layout">
+      ${productImageMarkup(details.imageUrl, productName, "product-details-image")}
+      <div class="product-details-copy">
+        <p class="eyebrow">${escapeHtml(details.retailer)}</p>
+        <h2 id="productDetailsTitle">${escapeHtml(productName)}</h2>
+        ${description ? `<p class="product-details-description">${escapeHtml(description)}</p>` : ""}
+        <dl class="product-details-facts">${details.facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+        <div class="product-details-price"><span>Current price</span><strong>${formatMoney(details.price)}</strong></div>
+        ${retailerLink}
+      </div>
+    </div>
+  `;
+  watchProductImages(content);
+  lastProductDetailsTrigger = trigger || document.activeElement;
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeProductDetails() {
+  const dialog = $("#productDetailsDialog");
+  if (dialog.open) dialog.close();
 }
 
 function stripComparisonBranding(value, brand = "") {
@@ -330,11 +453,46 @@ function buildComparisonQuery(product, store, preferredQuery = "") {
   return query;
 }
 
+function buildBasketRequirement(product, store, comparisonQuery) {
+  const targetSize = cleanDisplayText(store.size || product.targetSize || "");
+  const measure = parseMeasurement(targetSize, comparisonQuery);
+  const normalized = cleanDisplayText(`${product.category || ""} ${product.productFamily || ""} ${comparisonQuery}`).toLowerCase();
+  const productFamily = [
+    ["milk", /\b(?:milk|maas|amasi)\b/],
+    ["bread", /\b(?:bread|loaf)\b/],
+    ["eggs", /\beggs?\b/],
+    ["mince", /\b(?:mince|minced meat|ground beef)\b/],
+    ["chicken", /\bchicken\b/],
+    ["flour", /\bflour\b/],
+    ["rice", /\brice\b/],
+    ["sugar", /\bsugar\b/],
+    ["oil", /\b(?:cooking|sunflower|canola|vegetable) oil\b/],
+  ].find(([, pattern]) => pattern.test(normalized))?.[0] || cleanDisplayText(product.category || "product").toLowerCase();
+  return {
+    id: `requirement-${product.id}-${store.storeId}`,
+    productFamily,
+    query: comparisonQuery,
+    attributes: {},
+    desiredAmount: measure?.baseAmount || null,
+    normalizedUnit: measure?.dimension || null,
+    requestedQuantity: 1,
+    brandPreference: null,
+    brandRequired: false,
+    sourceProductId: product.id,
+    sourceRetailerId: store.storeId,
+    sourceProductName: cleanDisplayText(store.productName || product.canonicalName) || null,
+    displayLabel: cleanDisplayText(store.productName || product.canonicalName) || "Product",
+  };
+}
+
 function renderCatalogueResults() {
   const wrap = $("#catalogueResults");
   const pagination = $("#cataloguePagination");
   wrap.innerHTML = "";
-  pagination.hidden = true;
+  pagination.hidden = state.catalogueResults.length === 0;
+  $("#cataloguePreviousBtn").disabled = state.cataloguePage <= 1;
+  $("#catalogueMoreBtn").disabled = !state.catalogueHasMore;
+  $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage}`;
   if (!state.catalogueResults.length) return;
 
   const retailerMatches = state.catalogueRetailerMatches.length
@@ -417,10 +575,10 @@ function renderCatalogueResults() {
         ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
         : "";
       const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
-      const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
       const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
+      const existing = matchingBasketItem(store, product);
       article.innerHTML = `
-        <div class="catalogue-image">${image}</div>
+        ${productImageMarkup(store.imageUrl, productName, "catalogue-image", true)}
         <div class="catalogue-product-copy">
           ${bestPriceBadge}
           <span>${escapeHtml(productName)}</span>
@@ -428,9 +586,14 @@ function renderCatalogueResults() {
           ${special}
           ${link}
         </div>
-        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
+        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${quantityControlMarkup(existing, productName, true)}</div>
       `;
-      article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store, $("#catalogueSearchInput").value.trim()));
+      const imageButton = article.querySelector(".product-image-button");
+      imageButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openProductDetails(product, store, comparison, imageButton);
+      });
+      wireQuantityControl(article, product, store, state.catalogueQuery || $("#catalogueSearchInput").value.trim());
       columnMatches.appendChild(article);
     });
     wrap.appendChild(column);
@@ -441,7 +604,14 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
   const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
   const existing = state.items.find((item) => item.links?.[store.storeId] === store.url);
   if (existing) {
-    $("#catalogueStatus").textContent = `${productName} is already in the basket.`;
+    existing.quantity = wholeQuantity(existing.quantity) + 1;
+    state.latest = null;
+    renderItems();
+    renderResults();
+    await saveAll();
+    renderCatalogueResults();
+    if (state.specialsLoaded) renderSpecials();
+    scheduleBasketScan(150);
     return;
   }
   const comparisonQuery = buildComparisonQuery(product, store, preferredQuery);
@@ -461,31 +631,37 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
     selectedStoreName: store.storeName,
     selectedPrice: store.price,
     links: { [store.storeId]: store.url || "" },
+    requirement: buildBasketRequirement(product, store, comparisonQuery),
   });
+  state.latest = null;
   renderItems();
+  renderResults();
   await saveAll();
   $("#catalogueStatus").textContent = `${productName} added to the basket.`;
+  renderCatalogueResults();
+  if (state.specialsLoaded) renderSpecials();
   scheduleBasketScan(150);
 }
 
-async function searchCatalogue() {
+async function searchCatalogue(page = 1) {
   const query = $("#catalogueSearchInput").value.trim();
   if (!query) {
     $("#catalogueStatus").textContent = "Type a product to compare.";
     return;
   }
   const button = $("#catalogueSearchBtn");
+  state.catalogueQuery = query;
   button.disabled = true;
   $("#catalogueLoading").hidden = false;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
     readSettingsFromDom();
     const matchesPerRetailer = Math.min(12, Math.max(1, Number(state.settings.maxResultsPerStore || 6)));
-    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}${locationQuery()}`);
+    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}&page=${Math.max(1, page)}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
-    state.cataloguePage = 1;
-    state.catalogueHasMore = false;
+    state.cataloguePage = payload.page || Math.max(1, page);
+    state.catalogueHasMore = Boolean(payload.hasMore || Object.values(payload.retailerHasMore || {}).some(Boolean));
     $("#catalogueStatus").textContent = state.catalogueResults.length
       ? `Comparable unit prices for ${query}`
       : "No priced catalogue matches yet.";
@@ -531,15 +707,84 @@ function renderBasketTotals(scan) {
   Object.values(scan.basketTotals).forEach((total) => {
     const chip = document.createElement("div");
     chip.className = `total-chip ${scan.bestBasketStoreId === total.storeId ? "best" : ""}`;
-    const label = total.missing
-      ? `${total.storeName} known total, ${total.missing} missing`
-      : `${total.storeName} full basket`;
+    const missing = total.missingItemCount ?? total.missing ?? 0;
+    const matched = total.matchedItemCount ?? Math.max(0, (scan.scans?.length || 0) - missing);
+    const subtotal = total.knownSubtotal ?? total.total ?? 0;
+    const label = missing
+      ? `${total.storeName} known subtotal`
+      : `${total.storeName} complete basket`;
     chip.innerHTML = `
       <span>${label}</span>
-      <strong>${total.total ? formatMoney(total.total) : "-"}</strong>
+      <strong>${matched ? formatMoney(subtotal) : "No matches"}</strong>
+      <small>${matched} matched${missing ? ` · ${missing} missing` : ""}</small>
     `;
     wrap.appendChild(chip);
   });
+}
+
+function formatSuppliedAmount(value, kind) {
+  if (value == null) return "";
+  if (kind === "volume") return value >= 1000 ? `${Number((value / 1000).toFixed(2))} L` : `${value} ml`;
+  if (kind === "mass") return value >= 1000 ? `${Number((value / 1000).toFixed(2))} kg` : `${value} g`;
+  return `${value} item${value === 1 ? "" : "s"}`;
+}
+
+function comparisonResultCell(scan, store, result) {
+  if (!result || result.status !== "matched" || result.lineTotal == null) {
+    const reason = result?.status === "price-unavailable"
+      ? "A comparable product was found, but its price is unavailable."
+      : result?.status === "incompatible-size"
+        ? "Available packs cannot safely fulfil this size."
+        : "No safe comparable product found.";
+    const heading = result?.status === "price-unavailable" ? "Price unavailable" : "No suitable match";
+    return `
+      <div class="comparison-cell comparison-cell-missing" role="cell">
+        <strong>${heading}</strong>
+        <span>${escapeHtml(reason)}</span>
+      </div>
+    `;
+  }
+  const supplied = formatSuppliedAmount(result.totalSupplied, scan.requirement?.normalizedUnit);
+  const packs = `${result.unitsRequired || 1} pack${result.unitsRequired === 1 ? "" : "s"}`;
+  const confidence = result.matchConfidence == null ? "" : `${Math.round(result.matchConfidence * 100)}% match`;
+  const reasons = Array.isArray(result.matchReasons) ? result.matchReasons.filter(Boolean).slice(0, 3) : [];
+  const product = {
+    id: result.matchedProductId,
+    canonicalName: result.productName,
+    category: scan.category,
+    targetSize: result.size,
+    stores: [{
+      ...result,
+      storeId: store.id,
+      storeName: store.name,
+      productName: result.productName,
+      url: result.productUrl,
+      price: result.price,
+    }],
+  };
+  const detailPayload = escapeAttr(JSON.stringify(product));
+  return `
+    <div class="comparison-cell ${scan.bestStoreId === store.id ? "comparison-cell-best" : ""}" role="cell">
+      <div class="comparison-product">
+        <button class="comparison-image-button" type="button" data-comparison-product="${detailPayload}" aria-label="View details for ${escapeAttr(result.productName || "matched product")}">
+          ${result.imageUrl ? `<img src="${escapeAttr(result.imageUrl)}" alt="" loading="lazy" />` : `<span aria-hidden="true">R</span>`}
+        </button>
+        <div>
+          <strong>${escapeHtml(result.productName || "Matched product")}</strong>
+          <span>${escapeHtml([result.brand, result.size].filter(Boolean).join(" · "))}</span>
+        </div>
+      </div>
+      <div class="comparison-price">
+        <strong>${formatMoney(result.lineTotal)}</strong>
+        <span>${formatMoney(result.price)} each · ${packs}</span>
+        ${result.unitPrice != null ? `<span>${formatMoney(result.unitPrice)}${result.unitPriceLabel ? ` / ${escapeHtml(result.unitPriceLabel)}` : " unit price"}</span>` : ""}
+        ${supplied ? `<span>Supplies ${escapeHtml(supplied)} per basket item</span>` : ""}
+      </div>
+      ${confidence ? `<span class="match-confidence">${escapeHtml(confidence)}</span>` : ""}
+      ${reasons.length ? `<ul class="match-reasons">${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+      ${result.productUrl ? `<a href="${escapeAttr(result.productUrl)}" target="_blank" rel="noopener">View at ${escapeHtml(store.name)}</a>` : ""}
+    </div>
+  `;
 }
 
 function renderResults() {
@@ -551,58 +796,46 @@ function renderResults() {
     return;
   }
   $("#emptyResults").hidden = true;
-  state.latest.scans.forEach((scan) => {
-    const card = document.createElement("article");
-    card.className = "result-card";
-    const rows = scan.results
-      .map((result) => {
-        const isBest = scan.bestStoreId === result.storeId;
-        const adjustment = result.valueAdjustments?.length
-          ? ` after ${result.valueAdjustments.map((a) => a.label).join(", ")}`
-          : "";
-        const hasPrice = result.effectivePrice != null;
-        const measure = result.productMeasure?.label ? ` (${result.productMeasure.label})` : "";
-        const normalized = hasPrice && result.normalizedPrice != null && result.normalizedPrice !== result.effectivePrice
-          ? ` -> ${formatMoney(result.normalizedPrice)} target`
-          : "";
-        const dealLine = result.promoText
-          ? `<small class="deal-line ${result.promoApplied ? "applied" : "note"}">${escapeHtml(result.promoText)}</small>`
-          : "";
-        const wasPrice = hasPrice && result.regularPrice && result.regularPrice > result.price
-          ? `<span class="was-price">${formatMoney(result.regularPrice)}</span>`
-          : "";
-        const product = hasPrice
-          ? `${result.productName || "Matched product"}${measure}${adjustment}${normalized}`
-          : "Price not readable - direct supplier link:";
-        const link = hasPrice ? result.productUrl || result.queryUrl : result.queryUrl || result.productUrl;
-        const linkHtml = link
-          ? `<a class="direct-url" href="${escapeAttr(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a>`
-          : `<span class="direct-url muted">No direct link available</span>`;
-        return `
-          <div class="price-row ${isBest ? "best" : ""}">
-            <div class="supplier-result">
-              <strong>${result.storeName}</strong>
-              <small>${escapeHtml(product)}</small>
-              ${dealLine}
-              ${linkHtml}
-            </div>
-            <div class="price">${wasPrice}${formatMoney(result.effectivePrice)}</div>
-          </div>
-        `;
-      })
-      .join("");
-    card.innerHTML = `
-      <div class="result-head">
-        <div>
-          <h3>${escapeHtml(scan.name)}</h3>
-          <div class="status">${escapeHtml(scan.query)}${scan.targetMeasure?.label ? ` - target ${escapeHtml(scan.targetMeasure.label)}` : ""} - qty ${scan.quantity}</div>
+  const stores = defaultStores;
+  const matrix = document.createElement("div");
+  matrix.className = "comparison-matrix-wrap";
+  matrix.innerHTML = `
+    <div class="comparison-matrix" role="table" aria-label="Basket product comparison by retailer" style="--retailer-count:${stores.length}">
+      <div class="comparison-head comparison-requirement-head" role="columnheader">Basket requirement</div>
+      ${stores.map((store) => `<div class="comparison-head" role="columnheader">${escapeHtml(store.name)}</div>`).join("")}
+      ${state.latest.scans.map((scan) => `
+        <div class="comparison-requirement" role="rowheader">
+          <strong>${escapeHtml(scan.requirement?.displayLabel || scan.name)}</strong>
+          <span>${escapeHtml(scan.requirement?.productFamily || scan.category || "Product")}</span>
+          <span>${scan.targetMeasure?.label ? `Target ${escapeHtml(scan.targetMeasure.label)} · ` : ""}Qty ${scan.quantity}</span>
         </div>
-        <span class="badge">${scan.bestStoreName || "No match"}</span>
-      </div>
-      ${rows}
-    `;
-    wrap.appendChild(card);
+        ${stores.map((store) => comparisonResultCell(scan, store, scan.results.find((result) => result.storeId === store.id))).join("")}
+      `).join("")}
+      <div class="comparison-footer-label" role="rowheader">Basket totals</div>
+      ${stores.map((store) => {
+        const total = state.latest.basketTotals?.[store.id];
+        const missing = total?.missingItemCount ?? total?.missing ?? state.latest.scans.length;
+        const matched = total?.matchedItemCount ?? Math.max(0, state.latest.scans.length - missing);
+        const subtotal = total?.knownSubtotal ?? total?.total ?? 0;
+        return `<div class="comparison-footer" role="cell">
+          <strong>${matched ? formatMoney(subtotal) : "No matches"}</strong>
+          <span>${missing ? `Known subtotal · ${missing} missing` : "Complete basket total"}</span>
+        </div>`;
+      }).join("")}
+    </div>
+  `;
+  wrap.appendChild(matrix);
+  matrix.querySelectorAll("[data-comparison-product]").forEach((button) => {
+    button.addEventListener("click", () => {
+      try {
+        const product = JSON.parse(button.dataset.comparisonProduct || "{}");
+        openProductDetails(product, product.stores?.[0], null, button);
+      } catch (_error) {
+        // Ignore stale or malformed cached scan data.
+      }
+    });
   });
+  watchProductImages(matrix);
 }
 
 function escapeHtml(value) {
@@ -757,11 +990,16 @@ function renderSpecials() {
     const card = document.createElement("article");
     card.className = "special-card";
     const productName = cleanDisplayText(store.productName || special.canonicalName) || "Special";
-    const image = store.imageUrl
-      ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(productName)}" />`
-      : `<div class="catalogue-image-placeholder">Catalogue offer</div>`;
+    const product = {
+      id: special.productId,
+      canonicalName: special.canonicalName,
+      category: special.category,
+      targetSize: special.targetSize,
+    };
+    const existing = matchingBasketItem(store, product);
+    const comparison = getUnitComparison(product, store);
     card.innerHTML = `
-      <div class="special-card-image">${image}</div>
+      ${productImageMarkup(store.imageUrl, productName, "special-card-image", true)}
       <div class="special-card-copy">
         <span class="special-pill">${special.discountPercent ? `${special.discountPercent}% off` : "Catalogue special"}</span>
         <strong>${escapeHtml(productName)}</strong>
@@ -772,17 +1010,15 @@ function renderSpecials() {
         ${store.regularPrice ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : ""}
         <strong>${formatMoney(store.price)}</strong>
         ${special.saving ? `<small>Save ${formatMoney(special.saving)}</small>` : ""}
-        <button type="button">Add to basket</button>
+        ${quantityControlMarkup(existing, productName, true)}
       </div>
     `;
-    card.querySelector("button").addEventListener("click", () => addCatalogueProductToBasket({
-      id: special.productId,
-      canonicalName: special.canonicalName,
-      category: special.category,
-      targetSize: special.targetSize,
-    }, store));
+    const imageButton = card.querySelector(".product-image-button");
+    imageButton.addEventListener("click", () => openProductDetails(product, store, comparison, imageButton));
+    wireQuantityControl(card, product, store, state.catalogueQuery);
     wrap.appendChild(card);
   });
+  watchProductImages(wrap);
 }
 
 async function loadSpecials() {
@@ -1021,6 +1257,14 @@ function wireEvents() {
   $("#specialsToggle").addEventListener("click", () => {
     setSpecialsOpen($("#specialsToggle").getAttribute("aria-expanded") !== "true");
   });
+  $("#productDetailsCloseBtn").addEventListener("click", closeProductDetails);
+  $("#productDetailsDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeProductDetails();
+  });
+  $("#productDetailsDialog").addEventListener("close", () => {
+    lastProductDetailsTrigger?.focus?.();
+    lastProductDetailsTrigger = null;
+  });
   document.querySelectorAll('a[href="#specials"]').forEach((link) => {
     link.addEventListener("click", () => setSpecialsOpen(true));
   });
@@ -1085,6 +1329,6 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=27").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=28").catch(() => {});
   });
 }

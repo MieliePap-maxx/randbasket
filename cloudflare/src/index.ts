@@ -87,6 +87,19 @@ type HybridCandidate = {
   sources: Array<"keyword" | "vector">;
 };
 
+type BasketRequirement = {
+  id?: string;
+  productFamily?: string;
+  desiredAmount?: number;
+  normalizedUnit?: "mass" | "volume" | "count";
+  requestedQuantity?: number;
+  brandRequired?: boolean;
+  sourceRetailerId?: string;
+  sourceProductId?: string;
+  sourceProductName?: string;
+  displayLabel?: string;
+};
+
 type BasketItem = {
   id?: string;
   name?: string;
@@ -100,6 +113,7 @@ type BasketItem = {
   selectedBrand?: string;
   imageUrl?: string;
   links?: Record<string, string>;
+  requirement?: BasketRequirement;
 };
 
 type BasketSettings = {
@@ -129,6 +143,8 @@ export const PRODUCT_VECTOR_INDEX_NAME = "randbasket-products";
 export const MIN_SEMANTIC_SIMILARITY = 0.78;
 const SEMANTIC_CANDIDATE_LIMIT = 40;
 const VECTOR_INDEX_BATCH_SIZE = 32;
+const MAX_SIZE_OVERSUPPLY_RATIO = 0.35;
+const MAX_FULFILMENT_UNITS = 12;
 
 const semanticAliasRules = [
   {
@@ -671,7 +687,93 @@ function centsToPrice(cents: number | null) {
 
 type Measure = { amount: number; kind: "mass" | "volume" | "count" };
 
+type PackageMeasure = Measure & {
+  packageQuantity: number;
+  singleUnitAmount: number;
+  multipackCount: number;
+  normalizedUnit: "g" | "ml" | "count";
+};
+
+function normalizeMeasureText(value: string | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[']/g, "")
+    .replace(/litres?|liters?/g, "l")
+    .replace(/millilitres?|milliliters?/g, "ml")
+    .replace(/kilograms?/g, "kg")
+    .replace(/grams?/g, "g")
+    .replace(/[×Ã—]/g, "x");
+}
+
+export function parsePackageMeasure(value: string | undefined): PackageMeasure | null {
+  const text = normalizeMeasureText(value);
+  const multipack = text.match(/\b(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
+  const match = multipack || text.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
+  if (match) {
+    const multipackCount = multipack ? Number(match[1]) : 1;
+    const rawAmount = Number(multipack ? match[2] : match[1]);
+    const unit = multipack ? match[3] : match[2];
+    if (!Number.isFinite(multipackCount) || !Number.isFinite(rawAmount) || multipackCount <= 0 || rawAmount <= 0) return null;
+    const kind = unit === "kg" || unit === "g" ? "mass" : "volume";
+    const singleUnitAmount = unit === "kg" || unit === "l" ? rawAmount * 1000 : rawAmount;
+    return {
+      amount: multipackCount * singleUnitAmount,
+      kind,
+      packageQuantity: multipackCount * singleUnitAmount,
+      singleUnitAmount,
+      multipackCount,
+      normalizedUnit: kind === "mass" ? "g" : "ml",
+    };
+  }
+  const perUnit = text.match(/\bper\s+(kg|g|ml|l)\b/);
+  if (perUnit) return parsePackageMeasure(`1 ${perUnit[1]}`);
+  const count = text.match(/\b(\d+(?:\.\d+)?)[\s-]*(?:pack|pk|count|ct|pieces?|units?|eggs?|ea|s)\b/);
+  if (count && Number(count[1]) > 0) {
+    const amount = Number(count[1]);
+    return { amount, kind: "count", packageQuantity: amount, singleUnitAmount: 1, multipackCount: amount, normalizedUnit: "count" };
+  }
+  if (/\bdozen\b/.test(text)) {
+    return { amount: 12, kind: "count", packageQuantity: 12, singleUnitAmount: 1, multipackCount: 12, normalizedUnit: "count" };
+  }
+  return null;
+}
+
+export function planPackageFulfilment(targetText: string | undefined, offerText: string | undefined) {
+  const target = parsePackageMeasure(targetText);
+  const offered = parsePackageMeasure(offerText);
+  if (!target) {
+    return { valid: true, unitsRequired: 1, totalSupplied: offered?.amount ?? null, oversupplyRatio: 0, score: 0, difference: 0, reason: "No requested pack size" };
+  }
+  if (!offered || target.kind !== offered.kind) {
+    return { valid: false, unitsRequired: 0, totalSupplied: null, oversupplyRatio: Number.POSITIVE_INFINITY, score: Number.NEGATIVE_INFINITY, difference: Number.POSITIVE_INFINITY, reason: "Incompatible pack size" };
+  }
+  const unitsRequired = Math.ceil(target.amount / offered.amount);
+  if (unitsRequired < 1 || unitsRequired > MAX_FULFILMENT_UNITS) {
+    return { valid: false, unitsRequired, totalSupplied: offered.amount * Math.max(1, unitsRequired), oversupplyRatio: Number.POSITIVE_INFINITY, score: Number.NEGATIVE_INFINITY, difference: Number.POSITIVE_INFINITY, reason: "Too many packs required" };
+  }
+  const totalSupplied = offered.amount * unitsRequired;
+  const oversupplyRatio = Math.max(0, (totalSupplied - target.amount) / target.amount);
+  if (oversupplyRatio > MAX_SIZE_OVERSUPPLY_RATIO) {
+    return { valid: false, unitsRequired, totalSupplied, oversupplyRatio, score: Number.NEGATIVE_INFINITY, difference: Math.abs(Math.log(totalSupplied / target.amount)), reason: "Pack size supplies too much product" };
+  }
+  const exact = Math.abs(totalSupplied - target.amount) < 0.01;
+  const difference = Math.abs(Math.log(totalSupplied / target.amount));
+  return {
+    valid: true,
+    unitsRequired,
+    totalSupplied,
+    oversupplyRatio,
+    score: exact ? (unitsRequired === 1 ? 40 : Math.max(30, 36 - unitsRequired)) : Math.max(0, 28 - oversupplyRatio * 40 - (unitsRequired - 1) * 1.5),
+    difference,
+    reason: exact
+      ? (unitsRequired === 1 ? "Exact pack size" : `${unitsRequired} packs exactly meet the requested size`)
+      : `${unitsRequired} pack${unitsRequired === 1 ? "" : "s"} supply ${Math.round(oversupplyRatio * 100)}% extra`,
+  };
+}
+
 export function parseMeasure(value: string | undefined) {
+  const packageMeasure = parsePackageMeasure(value);
+  if (packageMeasure) return { amount: packageMeasure.amount, kind: packageMeasure.kind } satisfies Measure;
   const text = String(value || "").toLowerCase().replace(/[']/g, "");
   const multipack = text.match(/\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
   const match = multipack || text.match(/\b(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
@@ -694,10 +796,10 @@ export function parseMeasure(value: string | undefined) {
 
 export function normaliseForTarget(price: number | null, offeredSize: string | undefined, targetSize: string | undefined) {
   if (price == null) return null;
-  const offered = parseMeasure(offeredSize);
   const target = parseMeasure(targetSize);
-  if (!offered || !target || offered.kind !== target.kind) return price;
-  return Number((price * target.amount / offered.amount).toFixed(2));
+  if (!target) return price;
+  const fulfilment = planPackageFulfilment(targetSize, offeredSize);
+  return fulfilment.valid ? Number((price * fulfilment.unitsRequired).toFixed(2)) : null;
 }
 
 function validLocation(value: unknown): ShopperLocation | undefined {
@@ -740,6 +842,7 @@ function offerToStore(offer: OfferRow, location?: ShopperLocation) {
     brand: offer.brand || undefined,
     size: offer.size_label || undefined,
     unit: offer.unit_label || undefined,
+    priceCents: offer.price_cents && offer.price_cents > 0 ? offer.price_cents : null,
     price,
     normalizedPrice,
     regularPrice,
@@ -748,6 +851,7 @@ function offerToStore(offer: OfferRow, location?: ShopperLocation) {
     imageUrl: offer.image_url || undefined,
     status: price == null ? "catalogue-price-missing" : "cached",
     url: offer.product_url,
+    retailerProductId: offer.product_id,
     storeCode: offer.store_code || undefined,
     storeDisplayName: offer.store_display_name || undefined,
     distanceKm: distanceKm(location, offer.latitude, offer.longitude),
@@ -836,7 +940,41 @@ function processedMinceTerms(text: string) {
   ].filter((term) => includesPhrase(normalized, term));
 }
 
+export function normalizedProductFamily(text: string, category = "") {
+  const normalized = clean(`${category} ${text}`);
+  const families: Array<[string, RegExp]> = [
+    ["milk", /\b(?:milk|maas|amasi)\b/],
+    ["bread", /\b(?:bread|loaf)\b/],
+    ["eggs", /\beggs?\b/],
+    ["mince", /\b(?:mince|minced meat|ground beef)\b/],
+    ["chicken", /\bchicken\b/],
+    ["flour", /\bflour\b/],
+    ["rice", /\brice\b/],
+    ["sugar", /\bsugar\b/],
+    ["oil", /\b(?:cooking oil|sunflower oil|canola oil|vegetable oil)\b/],
+    ["coffee", /\bcoffee\b/],
+    ["tea", /\btea\b/],
+  ];
+  return families.find(([, pattern]) => pattern.test(normalized))?.[0] || clean(category).split(" ")[0] || "";
+}
+
 export function compareCharacteristics(referenceText: string, offerText: string) {
+  const referenceFamily = normalizedProductFamily(referenceText);
+  const offerFamily = normalizedProductFamily(offerText);
+  if (referenceFamily && offerFamily && referenceFamily !== offerFamily) return { valid: false, matches: 0 };
+  if (referenceFamily === "milk") {
+    const plantMilk = /\b(?:almond|oat|soy|soya|coconut|rice)\s+(?:drink|milk)\b/;
+    const referencePlant = plantMilk.test(clean(referenceText));
+    const offerPlant = plantMilk.test(clean(offerText));
+    if (referencePlant !== offerPlant) return { valid: false, matches: 0 };
+    const referenceLactoseFree = includesPhrase(referenceText, "lactose free");
+    const offerLactoseFree = includesPhrase(offerText, "lactose free");
+    if (referenceLactoseFree !== offerLactoseFree) return { valid: false, matches: 0 };
+    const flavourTerms = ["chocolate", "strawberry", "vanilla", "flavoured", "flavored"];
+    const referenceFlavoured = flavourTerms.some((term) => includesPhrase(referenceText, term));
+    const offerFlavoured = flavourTerms.some((term) => includesPhrase(offerText, term));
+    if (referenceFlavoured !== offerFlavoured) return { valid: false, matches: 0 };
+  }
   if (includesPhrase(referenceText, "sensitive")
     && !includesPhrase(offerText, "sensitive")
     && !includesPhrase(offerText, "hypoallergenic")) {
@@ -886,17 +1024,14 @@ export function compareCharacteristics(referenceText: string, offerText: string)
 }
 
 export function sizeCompatibility(targetText: string, offerText: string) {
-  const target = parseMeasure(targetText);
-  const offered = parseMeasure(offerText);
-  if (!target) return { valid: true, score: 0, difference: 0 };
-  if (!offered || target.kind !== offered.kind) {
-    return { valid: false, score: Number.NEGATIVE_INFINITY, difference: Number.POSITIVE_INFINITY };
-  }
-  const difference = Math.abs(Math.log(offered.amount / target.amount));
+  const fulfilment = planPackageFulfilment(targetText, offerText);
   return {
-    valid: true,
-    score: Math.abs(offered.amount - target.amount) < 0.01 ? 30 : Math.max(0, 22 - difference * 10),
-    difference,
+    valid: fulfilment.valid,
+    score: fulfilment.score,
+    difference: fulfilment.difference,
+    unitsRequired: fulfilment.unitsRequired,
+    totalSupplied: fulfilment.totalSupplied,
+    reason: fulfilment.reason,
   };
 }
 
@@ -952,6 +1087,10 @@ type RankedComparisonCandidate = {
 type ClosestBasketMatch = RankedComparisonCandidate & {
   product: ProductRow;
   store: ReturnType<typeof offerToStore>;
+  unitsRequired: number;
+  totalSupplied: number | null;
+  matchConfidence: number;
+  matchReasons: string[];
 };
 
 export function sortClosestCandidates<T extends RankedComparisonCandidate>(candidates: T[]) {
@@ -974,16 +1113,16 @@ async function findClosestBasketMatches(
   const profile = matchingProfile(comparisonQuery, referenceText, profiles);
   const targetCategory = resolvedCategoryFamily(item.category, `${comparisonQuery} ${referenceText}`)
     || categoryFamily(profile?.category || "");
+  const targetFamily = normalizedProductFamily(
+    item.requirement?.productFamily || `${comparisonQuery} ${referenceText}`,
+    item.category,
+  );
   const profileTerms = tokens(profile?.term || "");
   const queryTerms = tokens(comparisonQuery).filter((term) =>
     !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
     && !/^\d+(?:\.\d+)?$/.test(term));
   const discoveryTerms = profileTerms.length ? profileTerms : queryTerms;
-  if (!discoveryTerms.length) return new Map<string, {
-    product: ProductRow;
-    store: ReturnType<typeof offerToStore>;
-    matchScore: number;
-  }>();
+  if (!discoveryTerms.length) return new Map<string, ClosestBasketMatch>();
 
   const descriptorTokens = importantDescriptorTokens(referenceText, profile);
   const statements = enabledRetailers.map((retailer) => {
@@ -1024,6 +1163,8 @@ async function findClosestBasketMatches(
         if (targetCategory && rowCategory && rowCategory !== targetCategory) return null;
         if (store.price == null || !isStoreEligible(comparisonQuery, row.category || undefined, store, profiles)) return null;
         const offerText = clean([store.productName, store.brand, store.size, row.canonical_name, row.search_text].join(" "));
+        const rowFamily = normalizedProductFamily(offerText, row.category || "");
+        if (targetFamily && rowFamily && targetFamily !== rowFamily) return null;
         const characteristics = compareCharacteristics(`${comparisonQuery} ${referenceText}`, offerText);
         if (!characteristics.valid) return null;
         const size = sizeCompatibility(String(item.targetSize || comparisonQuery), store.size || store.productName);
@@ -1032,7 +1173,7 @@ async function findClosestBasketMatches(
         if (baseScore <= 0) return null;
         const descriptorHits = descriptorTokens.filter((term) => offerText.includes(term)).length;
         const categoryScore = !targetCategory || rowCategory === targetCategory ? 100 : 0;
-        const selectedProductBonus = item.selectedProductId === row.id ? 20 : 0;
+        const selectedProductBonus = item.selectedProductId === row.id ? 2 : 0;
         const matchScore = categoryScore
           + baseScore * 5
           + characteristics.matches * 20
@@ -1046,6 +1187,14 @@ async function findClosestBasketMatches(
           sizeDifference: size.difference,
           distance: store.distanceKm ?? Number.POSITIVE_INFINITY,
           price: store.price,
+          unitsRequired: size.unitsRequired,
+          totalSupplied: size.totalSupplied,
+          matchConfidence: Math.max(0, Math.min(1, matchScore / 210)),
+          matchReasons: [
+            targetFamily && rowFamily === targetFamily ? `Same ${targetFamily} product family` : "Same product category",
+            characteristics.matches ? `${characteristics.matches} requested characteristic${characteristics.matches === 1 ? "" : "s"} matched` : "Compatible product characteristics",
+            size.reason,
+          ],
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) as ClosestBasketMatch[];
@@ -1271,19 +1420,20 @@ async function findCatalogue(
     }),
   ];
   if (perRetailer > 0) {
+    const retailerStart = (page - 1) * perRetailer;
     const groupedMatches = retailers.flatMap((retailer) =>
       valueRankedMatches
         .filter((product) => product.stores[0]?.storeId === retailer.id)
-        .slice(0, perRetailer));
+        .slice(retailerStart, retailerStart + perRetailer));
     const retailerHasMore = Object.fromEntries(retailers.map((retailer) => [
       retailer.id,
-      valueRankedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length > perRetailer,
+      valueRankedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length > retailerStart + perRetailer,
     ]));
     return {
       products: groupedMatches,
       retailerMatches: groupedMatches,
       retailerHasMore,
-      hasMore: false,
+      hasMore: Object.values(retailerHasMore).some(Boolean),
       ...(debug ? {
         semanticSearchApplied: semanticCandidates.length > 0,
         semanticCandidateCount: semanticCandidates.length,
@@ -1732,6 +1882,24 @@ async function exactOffer(env: Env, retailerId: string, productUrl: string, loca
   })[0] || null;
 }
 
+export function calculateBasketLineTotalCents(priceCents: number | null, unitsRequired: number, basketQuantity: number) {
+  if (priceCents == null || priceCents <= 0 || unitsRequired < 1 || basketQuantity < 1) return null;
+  return Math.round(priceCents) * Math.round(unitsRequired) * Math.round(basketQuantity);
+}
+
+export function summarizeRetailerBasket(lineTotalsCents: Array<number | null>) {
+  const valid = lineTotalsCents.filter((value): value is number => value != null && Number.isFinite(value));
+  const knownSubtotalCents = valid.reduce((sum, value) => sum + Math.round(value), 0);
+  const missingItemCount = lineTotalsCents.length - valid.length;
+  return {
+    knownSubtotalCents,
+    knownSubtotal: centsToPrice(knownSubtotalCents) || 0,
+    matchedItemCount: valid.length,
+    missingItemCount,
+    isComplete: missingItemCount === 0,
+  };
+}
+
 async function scanBasket(request: Request, env: Env) {
   const body = await request.json<{ items?: BasketItem[]; settings?: BasketSettings }>()
     .catch(() => ({} as { items?: BasketItem[]; settings?: BasketSettings }));
@@ -1750,39 +1918,88 @@ async function scanBasket(request: Request, env: Env) {
       item.selectedBrand,
     );
     const quantity = Math.max(1, Math.round(Number(item.quantity || 1)));
-    const closestMatches = query
-      ? await findClosestBasketMatches(env, item, enabledRetailers, profiles, location)
-      : new Map<string, {
-        product: ProductRow;
-        store: ReturnType<typeof offerToStore>;
-        matchScore: number;
-      }>();
+    const requestedSize = String(item.targetSize || item.requirement?.displayLabel || query);
+    const requestedMeasure = parsePackageMeasure(requestedSize);
+    const requirement = {
+      id: item.requirement?.id || String(item.id || crypto.randomUUID()),
+      productFamily: normalizedProductFamily(item.requirement?.productFamily || query, item.category),
+      desiredAmount: item.requirement?.desiredAmount || requestedMeasure?.amount || null,
+      normalizedUnit: item.requirement?.normalizedUnit || requestedMeasure?.kind || null,
+      requestedQuantity: quantity,
+      brandRequired: Boolean(item.requirement?.brandRequired),
+      sourceRetailerId: item.requirement?.sourceRetailerId || null,
+      sourceProductId: item.requirement?.sourceProductId || item.selectedProductId || null,
+      sourceProductName: item.requirement?.sourceProductName || item.selectedProductName || item.name || null,
+      displayLabel: item.requirement?.displayLabel || item.name || query,
+    };
+    let closestMatches = new Map<string, ClosestBasketMatch>();
+    if (query) {
+      try {
+        closestMatches = await findClosestBasketMatches(env, item, enabledRetailers, profiles, location);
+      } catch (error) {
+        console.warn("Basket matching failed for one requirement", { itemId: item.id, error: String(error) });
+      }
+    }
     const results = [];
     for (const retailer of enabledRetailers) {
-      const linkedOffer = await exactOffer(env, retailer.id, String(item.links?.[retailer.id] || ""), location);
+      let linkedOffer: OfferRow | null = null;
+      try {
+        linkedOffer = await exactOffer(env, retailer.id, String(item.links?.[retailer.id] || ""), location);
+      } catch (error) {
+        console.warn("Exact basket offer lookup failed", { itemId: item.id, retailerId: retailer.id, error: String(error) });
+      }
       const closest = closestMatches.get(retailer.id);
       const store = linkedOffer ? offerToStore(linkedOffer, location) : closest?.store;
       const effectivePrice = store?.price ?? null;
-      const normalizedPrice = normaliseForTarget(
-        effectivePrice,
-        store?.size || store?.productName,
-        item.targetSize || query,
-      );
+      const fulfilment = store
+        ? planPackageFulfilment(requestedSize, store.size || store.productName)
+        : { valid: false, unitsRequired: 0, totalSupplied: null, reason: "No safe comparable product found" };
+      const packageMeasure = store ? parsePackageMeasure(store.size || store.productName) : null;
+      const lineTotalCents = fulfilment.valid
+        ? calculateBasketLineTotalCents(store?.priceCents ?? null, fulfilment.unitsRequired, quantity)
+        : null;
+      const normalizedPrice = lineTotalCents == null ? null : centsToPrice(lineTotalCents / quantity);
+      const status = !store
+        ? "no-match"
+        : effectivePrice == null
+          ? "price-unavailable"
+          : !fulfilment.valid
+            ? "incompatible-size"
+            : "matched";
       results.push({
         storeId: retailer.id,
         storeName: retailer.name,
-        status: store?.status || "catalogue-store-missing",
+        status,
         queryUrl: store?.url,
         price: effectivePrice,
+        priceCents: store?.priceCents ?? null,
         effectivePrice,
         normalizedPrice,
-        lineTotal: normalizedPrice == null ? null : Number((normalizedPrice * quantity).toFixed(2)),
+        unitPrice: store?.normalizedPrice ?? null,
+        unitPriceLabel: store?.unit ?? null,
+        lineTotalCents,
+        lineTotal: centsToPrice(lineTotalCents),
         productName: store?.productName || null,
+        brand: store?.brand || null,
+        size: store?.size || null,
+        unit: store?.unit || null,
         productUrl: store?.url || null,
         imageUrl: store?.imageUrl || null,
         productMeasure: store?.size ? { label: store.size } : null,
+        packageQuantity: packageMeasure?.singleUnitAmount ?? null,
+        packageUnit: packageMeasure?.normalizedUnit ?? null,
+        multipackCount: packageMeasure?.multipackCount ?? null,
+        normalizedQuantity: packageMeasure?.amount ?? null,
+        normalizedUnit: packageMeasure?.normalizedUnit ?? null,
         matchedProductId: linkedOffer?.product_id || closest?.product.id || null,
+        retailerProductId: store?.retailerProductId || null,
         matchScore: linkedOffer ? null : closest?.matchScore ?? null,
+        matchConfidence: linkedOffer ? 1 : closest?.matchConfidence ?? null,
+        matchReasons: linkedOffer
+          ? ["Exact product selected from this retailer", fulfilment.reason]
+          : closest?.matchReasons || [],
+        unitsRequired: fulfilment.valid ? fulfilment.unitsRequired : null,
+        totalSupplied: fulfilment.valid ? fulfilment.totalSupplied : null,
         regularPrice: store?.regularPrice ?? null,
         savings: store?.regularPrice && effectivePrice != null ? Number((store.regularPrice - effectivePrice).toFixed(2)) : null,
         promoText: store?.promoText,
@@ -1797,9 +2014,10 @@ async function scanBasket(request: Request, env: Env) {
       name: String(item.name || query),
       query,
       quantity,
+      requirement,
       category: String(item.category || ""),
       targetSize: String(item.targetSize || ""),
-      targetMeasure: item.targetSize ? { label: item.targetSize } : null,
+      targetMeasure: requestedSize ? { label: requestedSize } : null,
       results,
       bestStoreId: priced[0]?.storeId || null,
       bestStoreName: priced[0]?.storeName || null,
@@ -1807,18 +2025,31 @@ async function scanBasket(request: Request, env: Env) {
     });
   }
 
-  const basketTotals: Record<string, { storeId: string; storeName: string; total: number; missing: number }> = {};
+  const basketTotals: Record<string, {
+    storeId: string;
+    storeName: string;
+    knownSubtotalCents: number;
+    knownSubtotal: number;
+    total: number;
+    matchedItemCount: number;
+    missingItemCount: number;
+    missing: number;
+    isComplete: boolean;
+  }> = {};
   for (const retailer of enabledRetailers) {
-    let total = 0;
-    let missing = 0;
-    for (const scan of scans) {
+    const summary = summarizeRetailerBasket(scans.map((scan) => {
       const result = scan.results.find((entry) => entry.storeId === retailer.id);
-      if (!result || result.lineTotal == null) missing += 1;
-      else total += result.lineTotal;
-    }
-    basketTotals[retailer.id] = { storeId: retailer.id, storeName: retailer.name, total: Number(total.toFixed(2)), missing };
+      return result?.lineTotalCents ?? null;
+    }));
+    basketTotals[retailer.id] = {
+      storeId: retailer.id,
+      storeName: retailer.name,
+      ...summary,
+      total: summary.knownSubtotal,
+      missing: summary.missingItemCount,
+    };
   }
-  const bestBasket = Object.values(basketTotals).filter((entry) => entry.missing === 0).sort((left, right) => left.total - right.total)[0];
+  const bestBasket = Object.values(basketTotals).filter((entry) => entry.isComplete).sort((left, right) => left.knownSubtotalCents - right.knownSubtotalCents)[0];
   return json(request, env, {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
