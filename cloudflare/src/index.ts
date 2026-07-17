@@ -1161,8 +1161,8 @@ async function findClosestBasketMatches(
   // lookups below. The previous implementation repeated a wildcard JOIN for
   // every retailer and could exceed the Worker CPU limit on common searches.
   const candidateProducts = await findBalancedProductCandidates(env, discoveryTerms, enabledRetailers, {
-    matchAll: false,
-    limitPerRetailer: 70,
+    matchAll: profileTerms.length > 0,
+    limitPerRetailer: 16,
   });
   if (!candidateProducts.length) return new Map<string, ClosestBasketMatch>();
 
@@ -1257,8 +1257,8 @@ async function findCatalogue(
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
   const strictTerms = coreTokens.length ? coreTokens : queryTokens;
   const candidateLimit = perRetailer > 0
-    ? Math.min(70, Math.max(24, perRetailer * 8))
-    : 70;
+    ? Math.min(16, Math.max(6, perRetailer + 4))
+    : 12;
   const [strictResults, profileResult, semanticCandidates] = await Promise.all([
     findBalancedProductCandidates(env, strictTerms, retailers, {
       matchAll: true,
@@ -1284,10 +1284,10 @@ async function findCatalogue(
   const profileTerms = tokens(fuzzyProfile?.term || "");
   const profileLookupDiffers = profileTerms.length
     && profileTerms.join("|") !== strictTerms.join("|");
-  if (profileLookupDiffers) {
+  if (profileLookupDiffers && strictById.size < retailers.length * 2) {
     const profileResults = await findBalancedProductCandidates(env, profileTerms, retailers, {
       matchAll: true,
-      limitPerRetailer: 50,
+      limitPerRetailer: candidateLimit,
     });
     for (const product of profileResults) strictById.set(product.id, product);
   }
@@ -1295,11 +1295,11 @@ async function findCatalogue(
   // Only pay for the broad wildcard pass when the strict pass did not already
   // produce a useful candidate pool. This keeps common searches below the
   // Worker CPU limit while retaining fuzzy recall for sparse queries.
-  if (queryTokens.length > 1 && strictById.size < 120) {
+  if (queryTokens.length > 1 && strictById.size < retailers.length) {
     const broadTerms = coreTokens.length ? coreTokens : queryTokens;
     const broadResults = await findBalancedProductCandidates(env, broadTerms, retailers, {
       matchAll: false,
-      limitPerRetailer: 40,
+      limitPerRetailer: Math.max(6, candidateLimit),
     });
     for (const product of broadResults) strictById.set(product.id, product);
     results = [...strictById.values()];
