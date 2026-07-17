@@ -43,6 +43,7 @@ assert.equal(details.facts.some(([label]) => label === "Description"), false);
 
 const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
 const appSource = await readFile(new URL("./app.js", import.meta.url), "utf8");
+const serviceWorkerSource = await readFile(new URL("./service-worker.js", import.meta.url), "utf8");
 assert.match(html, /<dialog id="productDetailsDialog"[^>]*aria-labelledby="productDetailsTitle"/);
 assert.match(html, /aria-label="Close product details"/);
 assert.match(appSource, /openProductDetails\(product, store, comparison, imageButton\)/, "product image must open details");
@@ -50,5 +51,10 @@ assert.match(appSource, /lastProductDetailsTrigger\?\.focus\?\.\(\)/, "focus mus
 assert.match(appSource, /localStorage\.setItem\(STORAGE_KEY/, "basket persistence must remain enabled");
 assert.match(appSource, /&page=\$\{Math\.max\(1, page\)\}/, "catalogue pagination must be sent to the API");
 assert.match(appSource, /View retailer product/, "retailer product links must remain available");
+assert.match(appSource, /window\.location\.replace\(refreshUrl\.toString\(\)\)/, "stale HTML shells must refresh automatically");
+assert.match(appSource, /service-worker\.js\?v=30/, "the page must request the latest service worker");
+assert.match(serviceWorkerSource, /self\.skipWaiting\(\)/, "a repaired service worker must activate immediately");
+assert.match(serviceWorkerSource, /self\.clients\.claim\(\)/, "the repaired service worker must control existing tabs");
+assert.match(serviceWorkerSource, /cache: "no-store"/, "application updates must bypass stale HTTP caches");
 
 console.log("Shared catalogue quantity tests passed.");

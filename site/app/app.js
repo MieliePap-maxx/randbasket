@@ -1,3 +1,20 @@
+const APP_SHELL_VERSION = "30";
+const appShellReady = Boolean(
+  window.RandBasketCore
+  && document.getElementById("productDetailsDialog")
+  && document.getElementById("specialsToggle")
+  && document.getElementById("locationDialog"),
+);
+
+if (!appShellReady) {
+  const refreshUrl = new URL(window.location.href);
+  if (refreshUrl.searchParams.get("release") !== APP_SHELL_VERSION) {
+    refreshUrl.searchParams.set("release", APP_SHELL_VERSION);
+    window.location.replace(refreshUrl.toString());
+  }
+  throw new Error("Updating RandBasket application files. The page will reload automatically.");
+}
+
 const state = {
   items: [],
   settings: {},
@@ -1329,6 +1346,9 @@ init().catch((error) => {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js?v=28").catch(() => {});
+    navigator.serviceWorker
+      .register("./service-worker.js?v=30", { updateViaCache: "none" })
+      .then((registration) => registration.update())
+      .catch(() => {});
   });
 }
