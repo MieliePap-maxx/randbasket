@@ -48,8 +48,23 @@ for (let start = 0, part = 1; start < catalogue.length; start += batchSize, part
   const statements = ["PRAGMA foreign_keys = ON;"];
   for (const product of products) {
     const searchTerms = Array.isArray(product.searchTerms) ? product.searchTerms : [];
-    const searchText = clean([product.canonicalName, product.targetSize, product.category, ...searchTerms].join(" "));
-    addVocabularyText(vocabulary, product.canonicalName, searchText, searchTerms);
+    const retailerSearchText = (product.stores || []).flatMap((offer) => [
+      offer.productName,
+      offer.brand,
+      offer.size,
+      offer.storeName,
+    ]);
+    // Candidate discovery must understand retailer wording too. Keep the
+    // canonical product grouping unchanged, but enrich its searchable text
+    // with every reviewed title, brand and pack label attached to that group.
+    const searchText = clean([
+      product.canonicalName,
+      product.targetSize,
+      product.category,
+      ...searchTerms,
+      ...retailerSearchText,
+    ].join(" "));
+    addVocabularyText(vocabulary, product.canonicalName, searchText, searchTerms, ...retailerSearchText);
     statements.push(
       `INSERT OR REPLACE INTO catalogue_products (id, canonical_name, category, target_size, search_terms_json, search_text, updated_at) VALUES (${[
         sql(product.id), sql(product.canonicalName), sql(product.category), sql(product.targetSize), sql(JSON.stringify(searchTerms)), sql(searchText), sql(now),

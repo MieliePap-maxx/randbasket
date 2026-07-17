@@ -4,6 +4,8 @@ import {
   MIN_SEMANTIC_SIMILARITY,
   PRODUCT_EMBEDDING_DIMENSIONS,
   PRODUCT_EMBEDDING_MODEL,
+  assessCatalogueMatch,
+  buildRetailerDiagnostics,
   buildProductEmbeddingText,
   categoryFamily,
   calculateBasketLineTotalCents,
@@ -11,6 +13,7 @@ import {
   compareCharacteristics,
   findBalancedProductCandidates,
   findSemanticProductCandidates,
+  exactQueryCoverage,
   fuzzyQueryCoverage,
   fuzzyTokenSimilarity,
   inferredCategoryFamily,
@@ -21,6 +24,7 @@ import {
   normaliseForTarget,
   normalizedProductFamily,
   parsePackageMeasure,
+  parseQueryIntent,
   parseMeasure,
   planPackageFulfilment,
   scoreStore,
@@ -88,9 +92,11 @@ assert.equal(fuzzyTokenSimilarity("ml", "l"), 0);
 assert.equal(fuzzyQueryCoverage("full cream milk", "SPAR full cream or low fat fresh milk") > 0.99, true);
 assert.equal(fuzzyQueryCoverage("full cream milk", "full cream plain yoghurt") < 0.75, true);
 assert.equal(fuzzyQueryCoverage("chiken fillets", "Fresh Chicken Breast Fillets") > 0.9, true);
+assert.equal(exactQueryCoverage("full cream milk", "Clover full cream fresh milk 2L"), 1);
+assert.equal(exactQueryCoverage("full cream milk", "Clover low fat fresh milk 2L") < 0.5, true);
 assert.equal(matchesSearchTerm("SPAR Full Cream or Low Fat Fresh Milk 2 L", "full cream milk"), true);
-assert.equal(matchesSearchTerm("Plain Double Cream Yogurt 1kg", "yoghurt"), true);
-assert.equal(matchesSearchTerm("Colgate Total Toothpase 75ml", "toothpaste"), true);
+assert.equal(matchesSearchTerm("Plain Double Cream Yogurt 1kg", "yoghurt"), false, "request-time matching no longer uses edit distance");
+assert.equal(matchesSearchTerm("Colgate Total Toothpase 75ml", "toothpaste"), false, "known query corrections happen before exact matching");
 assert.equal(matchesSearchTerm("Silk hair treatment", "milk"), false);
 
 const vocabulary = (terms) => terms.map(([term, usage_count = 1]) => ({ term, usage_count }));
@@ -316,7 +322,7 @@ assert.equal(sizeCompatibility("2L", "1L").valid, true);
 assert.equal(sizeCompatibility("2L", "2L").score > sizeCompatibility("2L", "1L").score, true);
 assert.equal(sizeCompatibility("1kg", "2L").valid, false);
 assert.equal(normaliseForTarget(20, "1L", "2L"), 40);
-assert.equal(normaliseForTarget(75, "2.5kg", "1kg"), null, "oversized packages must not be fractionally priced");
+assert.equal(normaliseForTarget(75, "2.5kg", "1kg"), 75, "a larger compatible package remains a valid one-pack alternative");
 assert.deepEqual(parsePackageMeasure("10 x 500 ml"), {
   amount: 5000,
   kind: "volume",
@@ -329,7 +335,8 @@ assert.equal(parsePackageMeasure("not a package"), null);
 assert.equal(planPackageFulfilment("2L", "1L").unitsRequired, 2);
 assert.equal(planPackageFulfilment("2L", "1L").totalSupplied, 2000);
 assert.equal(planPackageFulfilment("2L", "2L").score > planPackageFulfilment("2L", "1L").score, true);
-assert.equal(planPackageFulfilment("1kg", "2.5kg").valid, false);
+assert.equal(planPackageFulfilment("1kg", "2.5kg").valid, true);
+assert.equal(planPackageFulfilment("1kg", "2.5kg").unitsRequired, 1);
 assert.equal(calculateBasketLineTotalCents(3499, 2, 3), 20994);
 assert.equal(calculateBasketLineTotalCents(null, 1, 1), null);
 assert.deepEqual(summarizeRetailerBasket([3499, 1799]), {
@@ -385,6 +392,120 @@ validCharacteristics("cake flour 2.5kg", "wheat cake flour 2.5kg");
 validCharacteristics("cake flour 2.5kg", "cake wheat flour 2.5kg");
 invalidCharacteristics("cake flour 2.5kg", "self raising flour 2.5kg");
 
+const intentCases = [
+  ["full cream milk 2l", "milk", "dairy"],
+  ["brown bread 700g", "bread", "bakery"],
+  ["large eggs 18 pack", "eggs", "dairy"],
+  ["beef mince 1kg", "mince", "meat"],
+  ["chicken fillets 1kg", "chicken", "meat"],
+  ["cake flour 2.5kg", "flour", "pantry"],
+  ["white sugar 2kg", "sugar", "pantry"],
+  ["long grain rice 2kg", "rice", "pantry"],
+  ["sunflower oil 2l", "oil", "pantry"],
+  ["instant coffee 200g", "coffee", "beverages"],
+  ["rooibos tea 80 pack", "tea", "beverages"],
+  ["toothpaste 75ml", "toothpaste", "personal care"],
+  ["2 ply toilet paper 18 pack", "toilet paper", "household"],
+  ["laundry washing powder 2kg", "laundry detergent", "household"],
+  ["dishwashing liquid 750ml", "dishwashing", "household"],
+  ["adult dog food 8kg", "dog food", "pet"],
+  ["breakfast cereal 750g", "cereal", "pantry"],
+  ["braai wors 1kg", "braai", "meat"],
+];
+for (const [query, family, category] of intentCases) {
+  const intent = parseQueryIntent(query);
+  assert.equal(intent.productFamily, family, `family intent failed for ${query}`);
+  assert.equal(intent.categoryFamily, category, `category intent failed for ${query}`);
+  assert.equal(intent.discoveryTerms.length > 0, true, `discovery terms missing for ${query}`);
+}
+assert.equal(parseQueryIntent("PnP Clover full cream milk 2L").retailerId, "pick-n-pay");
+assert.equal(parseQueryIntent("Clover full cream milk 2L").brand, "clover");
+assert.deepEqual(parseQueryIntent("lactose free full cream milk 2L").requiredCharacteristics, ["lactose free"]);
+assert.equal(parseQueryIntent("chicken flavour adult dog food 8kg").productFamily, "dog food");
+assert.equal(parseQueryIntent("baby rice cereal 500g").productFamily, "cereal");
+
+const genericMilkProduct = {
+  id: "generic-milk",
+  canonical_name: "Fresh Milk",
+  category: "Dairy",
+  target_size: "2 L",
+  search_terms_json: "[]",
+  search_text: "fresh full cream milk dairy",
+};
+const exactAssessment = assessCatalogueMatch(
+  "full cream fresh milk 2L",
+  genericMilkProduct,
+  { productName: "Housebrand Full Cream Fresh Milk 2L", size: "2 L", price: 34.99 },
+);
+assert.equal(exactAssessment.accepted, true);
+assert.equal(exactAssessment.matchTier, 1);
+assert.equal(exactAssessment.matchType, "exact");
+assert.equal(exactAssessment.isExactMatch, true);
+assert.equal(exactAssessment.effectiveTotalPrice, 34.99);
+assert.equal(exactAssessment.scoreBreakdown.tier, 100);
+
+const equivalentAssessment = assessCatalogueMatch(
+  "full cream fresh milk 2L",
+  genericMilkProduct,
+  { productName: "Housebrand Full Cream Fresh Milk 1L", size: "1 L", price: 18 },
+);
+assert.equal(equivalentAssessment.matchTier, 2);
+assert.equal(equivalentAssessment.unitsRequired, 2);
+assert.equal(equivalentAssessment.totalSupplied, 2000);
+assert.equal(equivalentAssessment.effectiveTotalPrice, 36);
+
+const closestAssessment = assessCatalogueMatch(
+  "full cream fresh milk 2L",
+  genericMilkProduct,
+  { productName: "Housebrand Full Cream Fresh Milk 1.5L", size: "1.5 L", price: 29 },
+);
+assert.equal(closestAssessment.matchTier, 3);
+assert.equal(closestAssessment.unitsRequired, 2);
+assert.equal(closestAssessment.totalSupplied, 3000);
+assert.equal(closestAssessment.sizeDifferencePercent, 50);
+
+const relatedAssessment = assessCatalogueMatch(
+  "full cream fresh milk 2L",
+  { ...genericMilkProduct, search_text: "fresh low fat milk dairy" },
+  { productName: "Housebrand Low Fat Fresh Milk 2L", size: "2 L", price: 32 },
+);
+assert.equal(relatedAssessment.matchTier, 4);
+assert.equal(relatedAssessment.isAlternative, true);
+assert.equal(relatedAssessment.relaxedCriteria.length > 0, true);
+
+const categoryFallbackAssessment = assessCatalogueMatch(
+  "dairy",
+  genericMilkProduct,
+  { productName: "Housebrand Fresh Milk 2L", size: "2 L", price: 32 },
+);
+assert.equal(categoryFallbackAssessment.accepted, true);
+assert.equal(categoryFallbackAssessment.matchTier, 5);
+
+assert.equal(assessCatalogueMatch(
+  "full cream milk 2L",
+  { ...genericMilkProduct, category: "Bakery", search_text: "white bread bakery" },
+  { productName: "White Bread 700g", size: "700 g", price: 18 },
+).accepted, false, "genuinely different product families must be rejected");
+assert.equal(assessCatalogueMatch(
+  "lactose free full cream milk 2L",
+  genericMilkProduct,
+  { productName: "Full Cream Fresh Milk 2L", size: "2 L", price: 35 },
+).accepted, false, "required dietary characteristics must not be relaxed");
+
+for (const [query, family, category] of intentCases) {
+  const product = {
+    id: family,
+    canonical_name: query,
+    category,
+    target_size: null,
+    search_terms_json: "[]",
+    search_text: `${query} ${family} ${category}`,
+  };
+  const assessment = assessCatalogueMatch(query, product, { productName: query, price: 10 });
+  assert.equal(assessment.accepted, true, `representative search should be accepted for ${query}`);
+  assert.equal(assessment.matchTier, 1, `representative search should be exact for ${query}`);
+}
+
 const ranked = sortClosestCandidates([
   { id: "cheap-poor", matchScore: 70, sizeDifference: 0, distance: 1, price: 10 },
   { id: "best-match", matchScore: 95, sizeDifference: 0.2, distance: 20, price: 35 },
@@ -423,13 +544,34 @@ const balancedProducts = await findBalancedProductCandidates({
 }, ["full", "cream", "milk"], [
   { id: "pick-n-pay", name: "Pick n Pay" },
   { id: "checkers", name: "Checkers" },
+  { id: "woolworths", name: "Woolworths" },
+  { id: "spar", name: "SPAR" },
+  { id: "makro", name: "Makro" },
 ], { matchAll: true, limitPerRetailer: 24 });
 assert.equal(balancedCalls.length, 1, "balanced matching must use one D1 statement");
-assert.match(balancedCalls[0].sql, /UNION ALL/, "retailer candidates should be combined in D1");
+assert.doesNotMatch(balancedCalls[0].sql, /UNION ALL/, "catalogue discovery must not repeat the wildcard scan per retailer");
+assert.match(balancedCalls[0].sql, /EXISTS/, "catalogue discovery should verify retailer offers through the indexed relationship");
+assert.match(balancedCalls[0].sql, /LIMIT 160/, "candidate discovery must remain globally bounded");
 assert.deepEqual(balancedCalls[0].bindings, [
-  "pick-n-pay", "%full%", "%cream%", "%milk%",
-  "checkers", "%full%", "%cream%", "%milk%",
+  "pick-n-pay", "checkers", "woolworths", "spar", "makro",
+  "%full%", "%cream%", "%milk%",
 ]);
 assert.deepEqual(balancedProducts.map((product) => product.id), ["milk-a", "milk-b"]);
+
+const diagnostics = buildRetailerDiagnostics(
+  [
+    { id: "pick-n-pay", name: "Pick n Pay" },
+    { id: "checkers", name: "Checkers" },
+    { id: "woolworths", name: "Woolworths" },
+  ],
+  { "pick-n-pay": 4, checkers: 3, woolworths: 0 },
+  { "pick-n-pay": 2, checkers: 0, woolworths: 0 },
+  { "pick-n-pay": 2, checkers: 0, woolworths: 0 },
+  { checkers: { "Different product family (bread)": 3 } },
+);
+assert.equal(diagnostics["pick-n-pay"].emptyReason, null);
+assert.match(diagnostics.checkers.emptyReason, /none were compatible/i);
+assert.equal(diagnostics.checkers.rejectionReasons["Different product family (bread)"], 3);
+assert.match(diagnostics.woolworths.emptyReason, /No current priced catalogue candidates/i);
 
 console.log("Catalogue comparison matching tests passed.");

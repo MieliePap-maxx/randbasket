@@ -34,7 +34,7 @@ function formatMoney(value) {
   return value == null ? "-" : moneyFmt.format(value);
 }
 
-const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths"];
+const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
 
 function updateSummary() {
   $("#itemCount").textContent = state.items.length;
@@ -124,6 +124,14 @@ function renderCatalogueResults() {
     const article = document.createElement("article");
     article.className = "catalogue-store-result";
     const { product, store } = match;
+    const tierLabels = {
+      1: "Exact match",
+      2: "Equivalent quantity",
+      3: "Closest compatible size",
+      4: "Related variant",
+      5: "Category alternative",
+    };
+    const tier = Number(store.matchTier || 5);
     const was = store.regularPrice && store.regularPrice > store.price ? `<span class="was-price">${formatMoney(store.regularPrice)}</span>` : "";
     const special = store.promoText ? `<small class="catalogue-special">${escapeHtml(store.promoText)}</small>` : "";
     const image = store.imageUrl ? `<img src="${escapeAttr(store.imageUrl)}" alt="${escapeAttr(product.canonicalName)}" />` : `<div class="catalogue-image-placeholder">Photo pending</div>`;
@@ -131,13 +139,14 @@ function renderCatalogueResults() {
     article.innerHTML = `
       <div class="catalogue-image">${image}</div>
       <div class="catalogue-product-copy">
+        <small class="match-tier-badge tier-${tier}">${escapeHtml(tierLabels[tier] || "Alternative")}</small>
         <strong>${escapeHtml(store.storeName)}</strong>
         <span>${escapeHtml(product.canonicalName)}</span>
         <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
         ${special}
         ${link}
       </div>
-      <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong><button type="button" class="catalogue-add-btn">Add to basket</button></div>
+      <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${store.unitsRequired > 1 && store.effectiveTotalPrice != null ? `<small>${store.unitsRequired} packs: ${formatMoney(store.effectiveTotalPrice)}</small>` : ""}<button type="button" class="catalogue-add-btn">Add to basket</button></div>
     `;
     article.querySelector(".catalogue-add-btn").addEventListener("click", () => addCatalogueProductToBasket(product, store));
     wrap.appendChild(article);
@@ -176,7 +185,7 @@ async function searchCatalogue(page = 1, options = {}) {
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
     const correctionQuery = allowCorrection ? "" : "&correct=false";
-    const payload = await api(`/api/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${correctionQuery}`);
+    const payload = await api(`/api/catalogue?q=${encodeURIComponent(query)}&perRetailer=5&page=${page}${correctionQuery}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
     state.cataloguePage = payload.page || page;

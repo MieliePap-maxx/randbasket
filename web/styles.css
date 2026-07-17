@@ -315,6 +315,22 @@ button:disabled {
   font-weight: 800;
 }
 
+.match-tier-badge {
+  display: inline-block !important;
+  width: fit-content;
+  border: 1px solid #b8cec1;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #e8f5ed;
+  color: #17694c !important;
+  font-size: 0.68rem !important;
+  font-weight: 900;
+}
+
+.match-tier-badge.tier-3,
+.match-tier-badge.tier-4,
+.match-tier-badge.tier-5 { background: #fff8e8; border-color: #d8c79b; color: #6d5520 !important; }
+
 .catalogue-price {
   align-items: flex-end;
   display: flex;

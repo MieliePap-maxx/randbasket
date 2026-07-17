@@ -1113,6 +1113,34 @@ button:disabled {
   text-align: left;
 }
 
+.match-tier-badge {
+  display: inline-block !important;
+  width: fit-content;
+  margin: 0 5px 5px 0 !important;
+  border: 1px solid #b8cec1;
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: #eef6f1;
+  color: var(--green-dark) !important;
+  font-size: 0.67rem !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+}
+
+.match-tier-badge.tier-1 { border-color: #28a96c; background: #e5f8ed; }
+.match-tier-badge.tier-2 { border-color: #6aab83; background: #eff8f1; }
+.match-tier-badge.tier-3 { border-color: #c7a34a; background: #fff9e8; color: #604a0d !important; }
+.match-tier-badge.tier-4,
+.match-tier-badge.tier-5 { border-color: #d3c7b8; background: #faf6f0; color: #6b5740 !important; }
+
+.catalogue-alternative-reason { color: #7a654c !important; }
+
+.catalogue-effective-price {
+  color: var(--green-dark) !important;
+  font-size: 0.72rem !important;
+  font-weight: 900 !important;
+}
+
 .catalogue-retailer-column .catalogue-price {
   grid-column: 1 / -1;
 }

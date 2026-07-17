@@ -1,4 +1,4 @@
-const APP_SHELL_VERSION = "30";
+const APP_SHELL_VERSION = "31";
 const appShellReady = Boolean(
   window.RandBasketCore
   && document.getElementById("productDetailsDialog")
@@ -23,6 +23,7 @@ const state = {
   pnpProgressTimer: null,
   catalogueResults: [],
   catalogueRetailerMatches: [],
+  catalogueRetailerDiagnostics: {},
   cataloguePage: 1,
   catalogueHasMore: false,
   specials: [],
@@ -265,7 +266,7 @@ function getUnitComparison(product, store) {
 function updateSummary() {
   setText("#itemCount", state.items.length);
   const maxResultsInput = $("#maxResultsInput");
-  if (maxResultsInput) maxResultsInput.value = state.settings.maxResultsPerStore || 6;
+  if (maxResultsInput) maxResultsInput.value = state.settings.maxResultsPerStore || 5;
 
   const latest = state.latest;
   const bestId = latest?.bestBasketStoreId;
@@ -510,7 +511,7 @@ function renderCatalogueResults() {
   $("#cataloguePreviousBtn").disabled = state.cataloguePage <= 1;
   $("#catalogueMoreBtn").disabled = !state.catalogueHasMore;
   $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage}`;
-  if (!state.catalogueResults.length) return;
+  if (!state.catalogueResults.length && !state.catalogueQuery) return;
 
   const retailerMatches = state.catalogueRetailerMatches.length
     ? state.catalogueRetailerMatches
@@ -528,11 +529,6 @@ function renderCatalogueResults() {
     })
     .sort((left, right) => comparisonStoreOrder.indexOf(left.store.storeId) - comparisonStoreOrder.indexOf(right.store.storeId));
 
-  if (!matches.length) {
-    wrap.innerHTML = `<div class="empty">No close priced catalogue matches on this page.</div>`;
-    return;
-  }
-
   const comparisonPrices = new Map();
   matches.forEach(({ comparison }) => {
     if (!comparison) return;
@@ -549,6 +545,10 @@ function renderCatalogueResults() {
   const groupedMatches = new Map(defaultStores.map((retailer) => [retailer.id, []]));
   matches.forEach((match) => groupedMatches.get(match.store.storeId)?.push(match));
   groupedMatches.forEach((storeMatches) => storeMatches.sort((left, right) => {
+    const tierOrder = Number(left.store.matchTier || 5) - Number(right.store.matchTier || 5);
+    if (tierOrder) return tierOrder;
+    const scoreOrder = Number(right.store.matchScore || 0) - Number(left.store.matchScore || 0);
+    if (scoreOrder) return scoreOrder;
     const suggestedOrder = Number(isBestValue(right)) - Number(isBestValue(left));
     if (suggestedOrder) return suggestedOrder;
     if (left.comparison && right.comparison && left.comparison.dimension === right.comparison.dimension) {
@@ -561,24 +561,34 @@ function renderCatalogueResults() {
 
   defaultStores.forEach((retailer) => {
     const storeMatches = groupedMatches.get(retailer.id) || [];
+    const diagnostics = state.catalogueRetailerDiagnostics[retailer.id] || {};
     const column = document.createElement("section");
     column.className = `catalogue-retailer-column retailer-${retailer.id}`;
     column.dataset.retailerColumn = retailer.id;
     column.innerHTML = `
       <header class="catalogue-retailer-heading">
         <span class="retailer-initial" aria-hidden="true">${escapeHtml(retailer.name.charAt(0))}</span>
-        <div><h3>${escapeHtml(retailer.name)}</h3><p>${storeMatches.length ? `${storeMatches.length} closest matches` : "No priced matches yet"}</p></div>
+        <div><h3>${escapeHtml(retailer.name)}</h3><p>${storeMatches.length ? `${storeMatches.length} ranked matches` : "No priced matches yet"}</p></div>
       </header>
       <div class="catalogue-retailer-matches"></div>
     `;
     const columnMatches = column.querySelector(".catalogue-retailer-matches");
     if (!storeMatches.length) {
-      columnMatches.innerHTML = `<div class="catalogue-retailer-empty">No close match is currently held for this retailer.</div>`;
+      columnMatches.innerHTML = `<div class="catalogue-retailer-empty">${escapeHtml(diagnostics.emptyReason || "No current comparable product is held for this retailer.")}</div>`;
     }
 
     storeMatches.forEach((match) => {
       const article = document.createElement("article");
       const { product, store, comparison } = match;
+      const tierLabels = {
+        1: "Exact match",
+        2: "Equivalent quantity",
+        3: "Closest compatible size",
+        4: "Related variant",
+        5: "Category alternative",
+      };
+      const tier = Number(store.matchTier || 5);
+      const tierBadge = `<span class="match-tier-badge tier-${tier}">${escapeHtml(tierLabels[tier] || "Alternative")}</span>`;
       const isBestPrice = isBestValue(match);
       const ranking = comparison ? rankings.get(comparison.dimension) : null;
       const saving = isBestPrice && ranking?.next ? ranking.next - ranking.best : 0;
@@ -591,19 +601,27 @@ function renderCatalogueResults() {
       const unitPrice = comparison
         ? `<small class="catalogue-unit-price">${formatMoney(comparison.unitPrice)} / ${comparison.comparisonUnit}</small>`
         : "";
+      const effectivePrice = store.unitsRequired > 1 && store.effectiveTotalPrice != null
+        ? `<small class="catalogue-effective-price">${store.unitsRequired} packs: ${formatMoney(store.effectiveTotalPrice)}</small>`
+        : "";
+      const alternative = store.isAlternative && store.alternativeReason
+        ? `<small class="catalogue-alternative-reason">${escapeHtml(store.alternativeReason)}</small>`
+        : "";
       const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
       const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
       const existing = matchingBasketItem(store, product);
       article.innerHTML = `
         ${productImageMarkup(store.imageUrl, productName, "catalogue-image", true)}
         <div class="catalogue-product-copy">
+          ${tierBadge}
           ${bestPriceBadge}
           <span>${escapeHtml(productName)}</span>
           <small>${escapeHtml([store.size, product.category].filter(Boolean).join(" - "))}</small>
           ${special}
+          ${alternative}
           ${link}
         </div>
-        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${quantityControlMarkup(existing, productName, true)}</div>
+        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${effectivePrice}${quantityControlMarkup(existing, productName, true)}</div>
       `;
       const imageButton = article.querySelector(".product-image-button");
       imageButton.addEventListener("click", (event) => {
@@ -673,10 +691,11 @@ async function searchCatalogue(page = 1) {
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
     readSettingsFromDom();
-    const matchesPerRetailer = Math.min(12, Math.max(1, Number(state.settings.maxResultsPerStore || 6)));
+    const matchesPerRetailer = Math.min(5, Math.max(1, Number(state.settings.maxResultsPerStore || 5)));
     const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}&page=${Math.max(1, page)}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
+    state.catalogueRetailerDiagnostics = payload.retailerDiagnostics || {};
     state.cataloguePage = payload.page || Math.max(1, page);
     state.catalogueHasMore = Boolean(payload.hasMore || Object.values(payload.retailerHasMore || {}).some(Boolean));
     $("#catalogueStatus").textContent = state.catalogueResults.length
@@ -701,7 +720,7 @@ function readItemsFromDom() {
 }
 
 function readSettingsFromDom() {
-  state.settings.maxResultsPerStore = Number($("#maxResultsInput").value || 6);
+  state.settings.maxResultsPerStore = Number($("#maxResultsInput").value || 5);
   state.settings.stores = {};
   $("#storeToggles")
     .querySelectorAll("input[type='checkbox']")
@@ -1312,7 +1331,7 @@ async function init() {
   }
   state.items = Array.isArray(saved.items) ? saved.items : [];
   state.settings = saved.settings || {
-    maxResultsPerStore: 6,
+    maxResultsPerStore: 5,
     stores: Object.fromEntries(defaultStores.map((store) => [store.id, true])),
   };
   delete state.settings.location;

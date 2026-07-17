@@ -37,6 +37,21 @@ export type CatalogueStoreMatch = {
   quantity?: string;
   url?: string;
   lastSeenAt?: string;
+  matchTier?: 1 | 2 | 3 | 4 | 5;
+  matchType?: "exact" | "equivalent-quantity" | "closest-size" | "related-variant" | "category-fallback";
+  matchScore?: number;
+  matchConfidence?: number;
+  matchReasons?: string[];
+  relaxedCriteria?: string[];
+  requestedSize?: string | null;
+  offeredSize?: string | null;
+  unitsRequired?: number;
+  totalSupplied?: number | null;
+  effectiveTotalPrice?: number | null;
+  sizeDifferencePercent?: number | null;
+  isExactMatch?: boolean;
+  isAlternative?: boolean;
+  alternativeReason?: string | null;
 };
 
 export type CatalogueProduct = {

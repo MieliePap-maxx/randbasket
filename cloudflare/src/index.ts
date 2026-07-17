@@ -143,8 +143,80 @@ export const PRODUCT_VECTOR_INDEX_NAME = "randbasket-products";
 export const MIN_SEMANTIC_SIMILARITY = 0.78;
 const SEMANTIC_CANDIDATE_LIMIT = 40;
 const VECTOR_INDEX_BATCH_SIZE = 32;
-const MAX_SIZE_OVERSUPPLY_RATIO = 0.35;
-const MAX_FULFILMENT_UNITS = 12;
+
+export type MatchTier = 1 | 2 | 3 | 4 | 5;
+
+export type QueryIntent = {
+  originalQuery: string;
+  normalizedQuery: string;
+  retailerId: string | null;
+  productFamily: string;
+  categoryFamily: string;
+  brand: string | null;
+  requestedSize: PackageMeasure | null;
+  requiredCharacteristics: string[];
+  preferredCharacteristics: string[];
+  informationalTerms: string[];
+  discoveryTerms: string[];
+};
+
+export type CatalogueMatchAssessment = {
+  accepted: boolean;
+  rejectionReason: string | null;
+  matchTier: MatchTier;
+  matchType: "exact" | "equivalent-quantity" | "closest-size" | "related-variant" | "category-fallback";
+  matchScore: number;
+  matchConfidence: number;
+  matchReasons: string[];
+  relaxedCriteria: string[];
+  requestedSize: string | null;
+  offeredSize: string | null;
+  unitsRequired: number;
+  totalSupplied: number | null;
+  effectiveTotalPrice: number | null;
+  sizeDifferencePercent: number | null;
+  isExactMatch: boolean;
+  isAlternative: boolean;
+  alternativeReason: string | null;
+  scoreBreakdown: Record<string, number>;
+};
+
+const familyRules: Array<{ family: string; category: string; pattern: RegExp; aliases: string[] }> = [
+  { family: "milk", category: "dairy", pattern: /\b(?:milk|maas|amasi)\b/, aliases: ["milk", "maas", "amasi"] },
+  { family: "bread", category: "bakery", pattern: /\b(?:bread|loaf)\b/, aliases: ["bread", "loaf"] },
+  { family: "eggs", category: "dairy", pattern: /\beggs?\b/, aliases: ["egg", "eggs"] },
+  { family: "mince", category: "meat", pattern: /\b(?:mince|minced meat|ground (?:beef|meat))\b/, aliases: ["mince", "minced", "ground beef"] },
+  { family: "chicken", category: "meat", pattern: /\b(?:chicken|poultry)\b/, aliases: ["chicken", "poultry"] },
+  { family: "flour", category: "pantry", pattern: /\bflour\b/, aliases: ["flour"] },
+  { family: "sugar", category: "pantry", pattern: /\bsugar\b/, aliases: ["sugar"] },
+  { family: "rice", category: "pantry", pattern: /\brice\b/, aliases: ["rice"] },
+  { family: "oil", category: "pantry", pattern: /\b(?:(?:cooking|sunflower|canola|vegetable|olive)\s+oil|oil)\b/, aliases: ["oil", "cooking oil"] },
+  { family: "coffee", category: "beverages", pattern: /\bcoffee\b/, aliases: ["coffee"] },
+  { family: "tea", category: "beverages", pattern: /\btea\b/, aliases: ["tea"] },
+  { family: "toothpaste", category: "personal care", pattern: /\b(?:toothpaste|tooth paste)\b/, aliases: ["toothpaste", "tooth paste"] },
+  { family: "toilet paper", category: "household", pattern: /\b(?:toilet paper|toilet tissue|bathroom tissue|loo roll)\b/, aliases: ["toilet paper", "toilet tissue", "bathroom tissue"] },
+  { family: "laundry detergent", category: "household", pattern: /\b(?:laundry detergent|washing powder|washing liquid|laundry capsules?|laundry pods?)\b/, aliases: ["laundry detergent", "washing powder", "washing liquid"] },
+  { family: "dishwashing", category: "household", pattern: /\b(?:dishwashing|dish washing|dishwasher|dish soap|washing up liquid)\b/, aliases: ["dishwashing", "dish soap", "washing up liquid"] },
+  { family: "dog food", category: "pet", pattern: /\b(?:dog food|dog pellets?|dog kibble)\b/, aliases: ["dog food", "dog pellets", "dog kibble"] },
+  { family: "cat food", category: "pet", pattern: /\b(?:cat food|cat pellets?|cat kibble)\b/, aliases: ["cat food", "cat pellets", "cat kibble"] },
+  { family: "cereal", category: "pantry", pattern: /\b(?:cereal|corn flakes|muesli|granola|porridge|oats)\b/, aliases: ["cereal", "corn flakes", "muesli", "oats"] },
+  { family: "braai", category: "meat", pattern: /\b(?:braai|barbecue|boerewors|wors)\b/, aliases: ["braai", "barbecue", "boerewors", "wors"] },
+];
+
+const specificFamilyPriority = [
+  "dog food", "cat food", "toilet paper", "laundry detergent", "dishwashing", "toothpaste", "cereal", "braai",
+];
+
+function matchingFamilyRule(text: string) {
+  return familyRules
+    .filter(({ pattern }) => pattern.test(text))
+    .sort((left, right) => {
+      const leftIndex = specificFamilyPriority.indexOf(left.family);
+      const rightIndex = specificFamilyPriority.indexOf(right.family);
+      return (leftIndex < 0 ? Number.POSITIVE_INFINITY : leftIndex)
+        - (rightIndex < 0 ? Number.POSITIVE_INFINITY : rightIndex);
+    })[0];
+}
 
 const semanticAliasRules = [
   {
@@ -291,6 +363,14 @@ export function fuzzyQueryCoverage(query: string, candidateText: string) {
 
 export const fuzzyTermCoverage = fuzzyQueryCoverage;
 
+export function exactQueryCoverage(query: string, candidateText: string) {
+  const queryTokens = orderedTokens(query).filter((term) =>
+    !fuzzyMeasurementTokens.has(term) && !/^\d+(?:\.\d+)?$/.test(term));
+  const candidateTokens = new Set(orderedTokens(candidateText));
+  if (!queryTokens.length || !candidateTokens.size) return 0;
+  return queryTokens.filter((term) => candidateTokens.has(term)).length / queryTokens.length;
+}
+
 export function stripRetailerAliases(text: string) {
   return clean(text)
     .replace(/\b(?:pick n pay|pick and pay|pnp|checkers|woolworths|woolies|spar|makro)\b/g, " ")
@@ -326,39 +406,24 @@ async function correctCatalogueQuery(env: Env, originalQuery: string, correction
   if (!correctionEnabled) {
     return { correctedQuery: normalizedQuery, correctionApplied: false };
   }
+  // Deliberate, constant-time corrections only. Search no longer performs a
+  // Levenshtein vocabulary scan during customer requests.
+  const knownCorrections: Record<string, string> = {
+    chiken: "chicken",
+    minse: "mince",
+    creem: "cream",
+    flouer: "flour",
+    bred: "bread",
+    yogert: "yogurt",
+    avocdo: "avocado",
+    toothpase: "toothpaste",
+  };
   const queryTokens = orderedTokens(normalizedQuery);
-  const meaningfulTokens = [...new Set(queryTokens.filter((token) =>
-    token.length >= 4 && isMeaningfulFuzzyToken(token)))];
-  if (!meaningfulTokens.length) {
-    return { correctedQuery: normalizedQuery, correctionApplied: false };
-  }
-  try {
-    const placeholders = meaningfulTokens.map(() => "?").join(",");
-    const { results: knownRows } = await env.DB.prepare(
-      `SELECT term, usage_count FROM search_vocabulary WHERE term IN (${placeholders})`,
-    ).bind(...meaningfulTokens).all<VocabularyRow>();
-    const knownTerms = new Set(knownRows.map((row) => clean(row.term)));
-    const corrections = new Map<string, string>();
-    for (const token of meaningfulTokens) {
-      if (knownTerms.has(token)) continue;
-      const { results: candidates } = await env.DB.prepare(
-        `SELECT term, usage_count FROM search_vocabulary
-         WHERE first_character = ?1 AND term_length BETWEEN ?2 AND ?3
-         ORDER BY usage_count DESC, term ASC
-         LIMIT 200`,
-      ).bind(token[0], Math.max(4, token.length - 2), token.length + 2).all<VocabularyRow>();
-      const corrected = chooseVocabularyCorrection(token, candidates);
-      if (corrected && corrected !== token) corrections.set(token, corrected);
-    }
-    const correctedTokens = queryTokens.map((token) => corrections.get(token) || token);
-    return {
-      correctedQuery: correctedTokens.join(" "),
-      correctionApplied: corrections.size > 0,
-    };
-  } catch {
-    // Older deployments may not have the vocabulary migration yet.
-    return { correctedQuery: normalizedQuery, correctionApplied: false };
-  }
+  const correctedTokens = queryTokens.map((token) => knownCorrections[token] || token);
+  return {
+    correctedQuery: correctedTokens.join(" "),
+    correctionApplied: correctedTokens.some((token, index) => token !== queryTokens[index]),
+  };
 }
 
 function parseJsonArray(value: string) {
@@ -749,14 +814,8 @@ export function planPackageFulfilment(targetText: string | undefined, offerText:
     return { valid: false, unitsRequired: 0, totalSupplied: null, oversupplyRatio: Number.POSITIVE_INFINITY, score: Number.NEGATIVE_INFINITY, difference: Number.POSITIVE_INFINITY, reason: "Incompatible pack size" };
   }
   const unitsRequired = Math.ceil(target.amount / offered.amount);
-  if (unitsRequired < 1 || unitsRequired > MAX_FULFILMENT_UNITS) {
-    return { valid: false, unitsRequired, totalSupplied: offered.amount * Math.max(1, unitsRequired), oversupplyRatio: Number.POSITIVE_INFINITY, score: Number.NEGATIVE_INFINITY, difference: Number.POSITIVE_INFINITY, reason: "Too many packs required" };
-  }
   const totalSupplied = offered.amount * unitsRequired;
   const oversupplyRatio = Math.max(0, (totalSupplied - target.amount) / target.amount);
-  if (oversupplyRatio > MAX_SIZE_OVERSUPPLY_RATIO) {
-    return { valid: false, unitsRequired, totalSupplied, oversupplyRatio, score: Number.NEGATIVE_INFINITY, difference: Math.abs(Math.log(totalSupplied / target.amount)), reason: "Pack size supplies too much product" };
-  }
   const exact = Math.abs(totalSupplied - target.amount) < 0.01;
   const difference = Math.abs(Math.log(totalSupplied / target.amount));
   return {
@@ -764,7 +823,7 @@ export function planPackageFulfilment(targetText: string | undefined, offerText:
     unitsRequired,
     totalSupplied,
     oversupplyRatio,
-    score: exact ? (unitsRequired === 1 ? 40 : Math.max(30, 36 - unitsRequired)) : Math.max(0, 28 - oversupplyRatio * 40 - (unitsRequired - 1) * 1.5),
+    score: exact ? (unitsRequired === 1 ? 40 : Math.max(24, 36 - unitsRequired)) : Math.max(0, 28 - Math.min(24, oversupplyRatio * 18) - Math.min(10, (unitsRequired - 1) * 1.25)),
     difference,
     reason: exact
       ? (unitsRequired === 1 ? "Exact pack size" : `${unitsRequired} packs exactly meet the requested size`)
@@ -887,7 +946,7 @@ function includesPhrase(text: string, phrase: string) {
 export function matchesSearchTerm(text: string, term: string) {
   const normalizedTerm = clean(term);
   if (includesPhrase(text, normalizedTerm)) return true;
-  return fuzzyQueryCoverage(normalizedTerm, text) >= 0.78;
+  return exactQueryCoverage(normalizedTerm, text) >= 0.8;
 }
 
 function eggSize(text: string) {
@@ -943,20 +1002,7 @@ function processedMinceTerms(text: string) {
 
 export function normalizedProductFamily(text: string, category = "") {
   const normalized = clean(`${category} ${text}`);
-  const families: Array<[string, RegExp]> = [
-    ["milk", /\b(?:milk|maas|amasi)\b/],
-    ["bread", /\b(?:bread|loaf)\b/],
-    ["eggs", /\beggs?\b/],
-    ["mince", /\b(?:mince|minced meat|ground beef)\b/],
-    ["chicken", /\bchicken\b/],
-    ["flour", /\bflour\b/],
-    ["rice", /\brice\b/],
-    ["sugar", /\bsugar\b/],
-    ["oil", /\b(?:cooking oil|sunflower oil|canola oil|vegetable oil)\b/],
-    ["coffee", /\bcoffee\b/],
-    ["tea", /\btea\b/],
-  ];
-  return families.find(([, pattern]) => pattern.test(normalized))?.[0] || clean(category).split(" ")[0] || "";
+  return matchingFamilyRule(normalized)?.family || "";
 }
 
 export function compareCharacteristics(referenceText: string, offerText: string) {
@@ -1024,6 +1070,236 @@ export function compareCharacteristics(referenceText: string, offerText: string)
   return { valid: true, matches };
 }
 
+const requiredCharacteristicTerms = [
+  "gluten free", "lactose free", "sugar free", "dairy free", "nut free",
+  "vegan", "vegetarian", "halal", "kosher", "sensitive", "hypoallergenic",
+];
+const preferredCharacteristicTerms = [
+  "full cream", "low fat", "fat free", "skim", "medium fat", "fresh", "long life", "uht",
+  "powdered", "white", "brown", "whole wheat", "wholewheat", "extra large", "jumbo", "large",
+  "medium", "small", "self raising", "cake", "bread flour", "whole chicken", "chicken portions",
+  "breast", "fillet", "drumstick", "thigh", "wing", "lean", "extra lean", "instant", "decaf",
+  "plain", "chocolate", "strawberry", "vanilla", "original", "free range", "organic",
+];
+const commonBrands = [
+  "clover", "parmalat", "first choice", "douglasdale", "crystal valley", "albany", "sasko",
+  "blue ribbon", "tastic", "spekkor", "ace", "iwisa", "white star", "koo", "all gold",
+  "five roses", "ricoffy", "nescafe", "jacobs", "colgate", "oral b", "sunlight", "omo",
+  "skip", "ariel", "handy andy", "pedigree", "royal canin", "purina", "kelloggs", "bokomo",
+];
+
+function phrasesPresent(text: string, phrases: string[]) {
+  return phrases.filter((phrase) => includesPhrase(text, phrase));
+}
+
+function retailerFromQuery(query: string) {
+  const normalized = clean(query);
+  return retailers.find((retailer) =>
+    includesPhrase(normalized, retailer.id)
+    || includesPhrase(normalized, retailer.name)
+    || (retailer.id === "pick-n-pay" && /\bpnp\b/.test(normalized))
+    || (retailer.id === "woolworths" && /\bwoolies\b/.test(normalized)))?.id || null;
+}
+
+export function parseQueryIntent(query: string): QueryIntent {
+  const originalQuery = String(query || "").trim();
+  const normalizedQuery = stripRetailerAliases(originalQuery);
+  const familyRule = matchingFamilyRule(normalizedQuery);
+  const productFamily = familyRule?.family || normalizedProductFamily(normalizedQuery);
+  const category = familyRule?.category || inferredCategoryFamily(normalizedQuery);
+  const requiredCharacteristics = phrasesPresent(normalizedQuery, requiredCharacteristicTerms);
+  const preferredCharacteristics = phrasesPresent(normalizedQuery, preferredCharacteristicTerms)
+    .filter((term) => !requiredCharacteristics.includes(term));
+  const brand = commonBrands.find((candidate) => includesPhrase(normalizedQuery, candidate)) || null;
+  const ignored = new Set([
+    ...tokens(productFamily),
+    ...requiredCharacteristics.flatMap(tokens),
+    ...preferredCharacteristics.flatMap(tokens),
+    ...tokens(brand || ""),
+    "kg", "g", "ml", "l", "ct", "pk", "pack", "packs", "each", "per",
+  ]);
+  const informationalTerms = orderedTokens(normalizedQuery).filter((term) =>
+    !ignored.has(term) && !/^\d+(?:\.\d+)?$/.test(term));
+  const discoveryTerms = [...new Set([
+    ...tokens(productFamily),
+    ...tokens(normalizedQuery).filter((term) =>
+      !fuzzyMeasurementTokens.has(term) && !/^\d+(?:\.\d+)?$/.test(term)),
+    ...(familyRule?.aliases || []).flatMap(tokens),
+  ])].slice(0, 8);
+  return {
+    originalQuery,
+    normalizedQuery,
+    retailerId: retailerFromQuery(originalQuery),
+    productFamily,
+    categoryFamily: category,
+    brand,
+    requestedSize: parsePackageMeasure(originalQuery),
+    requiredCharacteristics,
+    preferredCharacteristics,
+    informationalTerms,
+    discoveryTerms,
+  };
+}
+
+function explicitSpecies(text: string) {
+  return ["beef", "chicken", "pork", "lamb", "turkey", "venison", "fish"]
+    .find((species) => includesPhrase(text, species)) || "";
+}
+
+function severeIncompatibility(intent: QueryIntent, offerText: string, offeredFamily: string, offeredCategory: string) {
+  if (intent.productFamily && offeredFamily && intent.productFamily !== offeredFamily) {
+    return `Different product family (${offeredFamily})`;
+  }
+  if (intent.categoryFamily && offeredCategory && intent.categoryFamily !== offeredCategory) {
+    return `Different product category (${offeredCategory})`;
+  }
+  const requestedSpecies = explicitSpecies(intent.normalizedQuery);
+  const offeredSpecies = explicitSpecies(offerText);
+  if (requestedSpecies && offeredSpecies && requestedSpecies !== offeredSpecies) {
+    return `Different species (${offeredSpecies})`;
+  }
+  const queryPet = /\b(?:dog|cat|pet)\s+(?:food|mince|pellets?|kibble)\b/.test(intent.normalizedQuery);
+  const offerPet = /\b(?:dog|cat|pet)\s+(?:food|mince|pellets?|kibble)\b/.test(offerText);
+  if (queryPet !== offerPet && (queryPet || offerPet)) return "Pet food cannot be compared with human food";
+  if (intent.productFamily === "milk") {
+    const plantMilk = /\b(?:almond|oat|soy|soya|coconut|rice)\s+(?:drink|milk)\b/;
+    if (plantMilk.test(intent.normalizedQuery) !== plantMilk.test(offerText)) return "Plant and dairy milk are incompatible";
+  }
+  const offeredMeasure = parsePackageMeasure(offerText);
+  if (intent.requestedSize && offeredMeasure && intent.requestedSize.kind !== offeredMeasure.kind) {
+    return "Pack dimensions are incompatible";
+  }
+  const missingRequired = intent.requiredCharacteristics.filter((term) => !includesPhrase(offerText, term));
+  if (missingRequired.length) return `Missing required characteristic: ${missingRequired.join(", ")}`;
+  return null;
+}
+
+function relatedVariantDifferences(intent: QueryIntent, offerText: string) {
+  const relaxed: string[] = [];
+  for (const group of characteristicGroups) {
+    const requested = group.terms.filter((term) => includesPhrase(intent.normalizedQuery, term));
+    if (!requested.length) continue;
+    const offered = group.terms.filter((term) => includesPhrase(offerText, term));
+    if (!offered.some((term) => requested.includes(term))) {
+      relaxed.push(`${requested.join("/")} requested${offered.length ? `; ${offered.join("/")} offered` : "; not stated"}`);
+    }
+  }
+  const requestedEggSize = eggSize(intent.normalizedQuery);
+  if (requestedEggSize && eggSize(offerText) !== requestedEggSize) relaxed.push(`${requestedEggSize} egg size requested`);
+  const requestedFlour = flourType(intent.normalizedQuery);
+  if (requestedFlour && flourType(offerText) !== requestedFlour) relaxed.push(`${requestedFlour} flour requested`);
+  const requestedChicken = chickenForm(intent.normalizedQuery);
+  if (requestedChicken && chickenForm(offerText) !== requestedChicken) relaxed.push(`${requestedChicken} chicken requested`);
+  return [...new Set(relaxed)];
+}
+
+function displayPackageMeasure(measure: PackageMeasure | null) {
+  if (!measure) return null;
+  const amount = measure.normalizedUnit === "g" && measure.amount >= 1000
+    ? `${Number((measure.amount / 1000).toFixed(2))} kg`
+    : measure.normalizedUnit === "ml" && measure.amount >= 1000
+      ? `${Number((measure.amount / 1000).toFixed(2))} L`
+      : `${Number(measure.amount.toFixed(2))} ${measure.normalizedUnit}`;
+  return amount;
+}
+
+export function assessCatalogueMatch(
+  intentOrQuery: QueryIntent | string,
+  product: ProductRow,
+  store: { productName: string; brand?: string; size?: string; price?: number | null },
+  options: { lexicalScore?: number; semanticScore?: number } = {},
+): CatalogueMatchAssessment {
+  const intent = typeof intentOrQuery === "string" ? parseQueryIntent(intentOrQuery) : intentOrQuery;
+  const offerText = clean([product.canonical_name, product.category, product.search_text, store.productName, store.brand, store.size].join(" "));
+  const offeredFamily = normalizedProductFamily(offerText, product.category || "");
+  const offeredCategory = resolvedCategoryFamily(product.category, offerText);
+  const rejectionReason = severeIncompatibility(intent, offerText, offeredFamily, offeredCategory);
+  const rejected: CatalogueMatchAssessment = {
+    accepted: false,
+    rejectionReason,
+    matchTier: 5,
+    matchType: "category-fallback",
+    matchScore: 0,
+    matchConfidence: 0,
+    matchReasons: [],
+    relaxedCriteria: [],
+    requestedSize: displayPackageMeasure(intent.requestedSize),
+    offeredSize: store.size || displayPackageMeasure(parsePackageMeasure(offerText)),
+    unitsRequired: 1,
+    totalSupplied: null,
+    effectiveTotalPrice: null,
+    sizeDifferencePercent: null,
+    isExactMatch: false,
+    isAlternative: true,
+    alternativeReason: rejectionReason,
+    scoreBreakdown: {},
+  };
+  if (rejectionReason) return rejected;
+
+  const offeredMeasure = parsePackageMeasure(store.size || store.productName || offerText);
+  const fulfilment = planPackageFulfilment(intent.originalQuery, store.size || store.productName || offerText);
+  const relaxedCriteria = relatedVariantDifferences(intent, offerText);
+  const familyMatch = Boolean(intent.productFamily && intent.productFamily === offeredFamily);
+  const categoryMatch = Boolean(intent.categoryFamily && intent.categoryFamily === offeredCategory);
+  const hasRequestedSize = Boolean(intent.requestedSize);
+  const exactQuantity = Boolean(intent.requestedSize && offeredMeasure && fulfilment.valid
+    && Math.abs((fulfilment.totalSupplied || 0) - intent.requestedSize.amount) < 0.01);
+  let matchTier: MatchTier;
+  if (familyMatch && !relaxedCriteria.length && (!hasRequestedSize || (exactQuantity && fulfilment.unitsRequired === 1))) matchTier = 1;
+  else if (familyMatch && !relaxedCriteria.length && exactQuantity) matchTier = 2;
+  else if (familyMatch && !relaxedCriteria.length && intent.requestedSize && offeredMeasure) matchTier = 3;
+  else if (familyMatch) matchTier = 4;
+  else matchTier = 5;
+  const matchTypes = ["exact", "equivalent-quantity", "closest-size", "related-variant", "category-fallback"] as const;
+  const matchType = matchTypes[matchTier - 1];
+  const lexicalCoverage = exactQueryCoverage(intent.normalizedQuery, offerText);
+  const exactTokenCoverage = tokens(intent.normalizedQuery).filter((term) => tokens(offerText).includes(term)).length
+    / Math.max(1, tokens(intent.normalizedQuery).length);
+  const requestedPreferred = intent.preferredCharacteristics;
+  const characteristicMatches = requestedPreferred.filter((term) => includesPhrase(offerText, term)).length;
+  const sizeDifferencePercent = intent.requestedSize && fulfilment.valid && fulfilment.totalSupplied != null
+    ? Number((Math.abs(fulfilment.totalSupplied - intent.requestedSize.amount) / intent.requestedSize.amount * 100).toFixed(1))
+    : null;
+  const scoreBreakdown = {
+    tier: [100, 86, 72, 56, 40][matchTier - 1],
+    family: familyMatch ? 20 : categoryMatch ? 8 : 0,
+    lexical: Number((Math.max(lexicalCoverage, exactTokenCoverage) * 30).toFixed(2)),
+    characteristics: characteristicMatches * 5 - relaxedCriteria.length * 4,
+    size: sizeDifferencePercent == null ? 0 : Number(Math.max(0, 15 - Math.min(15, sizeDifferencePercent / 8)).toFixed(2)),
+    brand: intent.brand && includesPhrase(offerText, intent.brand) ? 6 : 0,
+    semantic: 0,
+    lexicalCandidate: Number(Math.min(8, Math.max(0, options.lexicalScore || 0)).toFixed(2)),
+  };
+  const matchScore = Number(Object.values(scoreBreakdown).reduce((sum, value) => sum + value, 0).toFixed(3));
+  const unitsRequired = fulfilment.valid ? Math.max(1, fulfilment.unitsRequired) : 1;
+  const effectiveTotalPrice = store.price == null ? null : Number((store.price * unitsRequired).toFixed(2));
+  const matchReasons = [
+    familyMatch ? `Same ${intent.productFamily} product family` : categoryMatch ? `Same ${intent.categoryFamily} category` : "Related catalogue product",
+    hasRequestedSize ? (fulfilment.valid ? fulfilment.reason : "Pack size is not stated") : "No pack size requested",
+    characteristicMatches ? `${characteristicMatches} requested characteristic${characteristicMatches === 1 ? "" : "s"} matched` : "Core product wording matched",
+  ];
+  return {
+    accepted: familyMatch || categoryMatch || (!intent.productFamily && lexicalCoverage >= 0.55),
+    rejectionReason: null,
+    matchTier,
+    matchType,
+    matchScore,
+    matchConfidence: Number(Math.max(0, Math.min(1, matchScore / 165)).toFixed(3)),
+    matchReasons,
+    relaxedCriteria,
+    requestedSize: displayPackageMeasure(intent.requestedSize),
+    offeredSize: store.size || displayPackageMeasure(offeredMeasure),
+    unitsRequired,
+    totalSupplied: fulfilment.valid ? fulfilment.totalSupplied : offeredMeasure?.amount ?? null,
+    effectiveTotalPrice,
+    sizeDifferencePercent,
+    isExactMatch: matchTier === 1,
+    isAlternative: matchTier > 1,
+    alternativeReason: matchTier > 1 ? relaxedCriteria[0] || matchReasons[1] : null,
+    scoreBreakdown,
+  };
+}
+
 export function sizeCompatibility(targetText: string, offerText: string) {
   const fulfilment = planPackageFulfilment(targetText, offerText);
   return {
@@ -1042,8 +1318,8 @@ function matchingProfile(query: string, referenceText: string, profiles: SearchP
   return profiles
     .map((profile) => {
       const profileTerm = clean(profile.term);
-      const queryCoverage = fuzzyQueryCoverage(profileTerm, normalizedQuery);
-      const referenceCoverage = fuzzyQueryCoverage(profileTerm, normalizedReference);
+      const queryCoverage = exactQueryCoverage(profileTerm, normalizedQuery);
+      const referenceCoverage = exactQueryCoverage(profileTerm, normalizedReference);
       const exactBonus = includesPhrase(normalizedQuery, profileTerm) ? 2 : 0;
       const lengthBonus = Math.min(tokens(profileTerm).length, 4) * 0.08;
       return {
@@ -1088,10 +1364,16 @@ type RankedComparisonCandidate = {
 type ClosestBasketMatch = RankedComparisonCandidate & {
   product: ProductRow;
   store: ReturnType<typeof offerToStore>;
+  matchTier: MatchTier;
+  matchType: CatalogueMatchAssessment["matchType"];
   unitsRequired: number;
   totalSupplied: number | null;
+  effectiveTotalPrice: number | null;
+  sizeDifferencePercent: number | null;
   matchConfidence: number;
   matchReasons: string[];
+  relaxedCriteria: string[];
+  alternativeReason: string | null;
 };
 
 export function sortClosestCandidates<T extends RankedComparisonCandidate>(candidates: T[]) {
@@ -1111,22 +1393,31 @@ export async function findBalancedProductCandidates(
   const terms = [...new Set(searchTerms.filter(Boolean))].slice(0, 8);
   if (!terms.length || !targetRetailers.length) return [] as ProductRow[];
   const operator = options.matchAll === false ? " OR " : " AND ";
-  const limit = Math.min(120, Math.max(1, Math.round(options.limitPerRetailer || 70)));
-  const bindings: unknown[] = [];
-  const retailerQueries = targetRetailers.map((retailer) => {
-    bindings.push(retailer.id, ...terms.map((term) => `%${term}%`));
-    const searchClauses = terms.map(() => "p.search_text LIKE ?").join(operator);
-    return `SELECT * FROM (
-      SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
-      FROM catalogue_products p
-      JOIN catalogue_offers o ON o.product_id = p.id
-      WHERE o.retailer_id = ? AND (${searchClauses})
-      GROUP BY p.id
-      LIMIT ${limit}
-    )`;
-  });
-  const { results } = await env.DB.prepare(retailerQueries.join(" UNION ALL "))
-    .bind(...bindings)
+  const perRetailerLimit = Math.min(30, Math.max(1, Math.round(options.limitPerRetailer || 16)));
+  const globalLimit = Math.min(160, perRetailerLimit * targetRetailers.length * 2);
+  const retailerBindings = targetRetailers.map((_, index) => `?${index + 1}`);
+  const termOffset = targetRetailers.length;
+  const searchClauses = terms
+    .map((_, index) => `p.search_text LIKE ?${termOffset + index + 1}`)
+    .join(operator);
+  // Scan the product catalogue once. The old UNION repeated the same leading-
+  // wildcard product scan for every retailer and caused production Error 1102.
+  // Retailer balancing happens after the indexed offer lookup and ranking.
+  const { results } = await env.DB.prepare(
+    `SELECT p.id, p.canonical_name, p.category, p.target_size, p.search_terms_json, p.search_text
+     FROM catalogue_products p
+     WHERE (${searchClauses})
+       AND EXISTS (
+         SELECT 1 FROM catalogue_offers o
+         WHERE o.product_id = p.id
+           AND o.retailer_id IN (${retailerBindings.join(",")})
+       )
+     ORDER BY LENGTH(p.search_text) ASC, p.id ASC
+     LIMIT ${globalLimit}`,
+  ).bind(
+    ...targetRetailers.map((retailer) => retailer.id),
+    ...terms.map((term) => `%${term}%`),
+  )
     .all<ProductRow>();
   const unique = new Map<string, ProductRow>();
   for (const product of results) unique.set(product.id, product);
@@ -1142,6 +1433,7 @@ async function findClosestBasketMatches(
 ) {
   const comparisonQuery = stripRetailerAliases(String(item.comparisonQuery || item.query || item.name || ""));
   const referenceText = withoutBrand(String(item.selectedProductName || item.name || comparisonQuery), item.selectedBrand);
+  const intent = parseQueryIntent(`${comparisonQuery} ${referenceText} ${item.targetSize || ""}`);
   const profile = matchingProfile(comparisonQuery, referenceText, profiles);
   const targetCategory = resolvedCategoryFamily(item.category, `${comparisonQuery} ${referenceText}`)
     || categoryFamily(profile?.category || "");
@@ -1153,16 +1445,15 @@ async function findClosestBasketMatches(
   const queryTerms = tokens(comparisonQuery).filter((term) =>
     !["kg", "g", "ml", "l", "ct", "pk"].includes(term)
     && !/^\d+(?:\.\d+)?$/.test(term));
-  const discoveryTerms = profileTerms.length ? profileTerms : queryTerms;
+  const discoveryTerms = intent.discoveryTerms.length ? intent.discoveryTerms : (profileTerms.length ? profileTerms : queryTerms);
   if (!discoveryTerms.length || !enabledRetailers.length) return new Map<string, ClosestBasketMatch>();
 
-  const descriptorTokens = importantDescriptorTokens(referenceText, profile);
   // Discover products once, then use the indexed product_id/retailer_id offer
   // lookups below. The previous implementation repeated a wildcard JOIN for
   // every retailer and could exceed the Worker CPU limit on common searches.
   const candidateProducts = await findBalancedProductCandidates(env, discoveryTerms, enabledRetailers, {
-    matchAll: profileTerms.length > 0,
-    limitPerRetailer: 16,
+    matchAll: false,
+    limitPerRetailer: 18,
   });
   if (!candidateProducts.length) return new Map<string, ClosestBasketMatch>();
 
@@ -1193,42 +1484,28 @@ async function findClosestBasketMatches(
         const row = productsById.get(offer.product_id);
         if (!row) return null;
         const store = offerToStore(offer, location);
-        const rowCategory = resolvedCategoryFamily(row.category, `${row.canonical_name} ${row.search_text}`);
-        if (targetCategory && rowCategory && rowCategory !== targetCategory) return null;
-        if (store.price == null || !isStoreEligible(comparisonQuery, row.category || undefined, store, profiles)) return null;
-        const offerText = clean([store.productName, store.brand, store.size, row.canonical_name, row.search_text].join(" "));
-        const rowFamily = normalizedProductFamily(offerText, row.category || "");
-        if (targetFamily && rowFamily && targetFamily !== rowFamily) return null;
-        const characteristics = compareCharacteristics(`${comparisonQuery} ${referenceText}`, offerText);
-        if (!characteristics.valid) return null;
-        const size = sizeCompatibility(String(item.targetSize || comparisonQuery), store.size || store.productName);
-        if (!size.valid) return null;
-        const baseScore = scoreStore(comparisonQuery, row, store, profiles);
-        if (baseScore <= 0) return null;
-        const descriptorHits = descriptorTokens.filter((term) => offerText.includes(term)).length;
-        const categoryScore = !targetCategory || rowCategory === targetCategory ? 100 : 0;
-        const selectedProductBonus = item.selectedProductId === row.id ? 2 : 0;
-        const matchScore = categoryScore
-          + baseScore * 5
-          + characteristics.matches * 20
-          + descriptorHits * 5
-          + size.score
-          + selectedProductBonus;
+        if (store.price == null) return null;
+        const assessment = assessCatalogueMatch(intent, row, store, {
+          lexicalScore: exactQueryCoverage(comparisonQuery, `${row.search_text} ${store.productName}`) * 8,
+        });
+        if (!assessment.accepted) return null;
         return {
           product: row,
           store,
-          matchScore,
-          sizeDifference: size.difference,
+          matchTier: assessment.matchTier,
+          matchType: assessment.matchType,
+          matchScore: assessment.matchScore + (item.selectedProductId === row.id ? 2 : 0),
+          sizeDifference: assessment.sizeDifferencePercent ?? Number.POSITIVE_INFINITY,
           distance: store.distanceKm ?? Number.POSITIVE_INFINITY,
           price: store.price,
-          unitsRequired: size.unitsRequired,
-          totalSupplied: size.totalSupplied,
-          matchConfidence: Math.max(0, Math.min(1, matchScore / 210)),
-          matchReasons: [
-            targetFamily && rowFamily === targetFamily ? `Same ${targetFamily} product family` : "Same product category",
-            characteristics.matches ? `${characteristics.matches} requested characteristic${characteristics.matches === 1 ? "" : "s"} matched` : "Compatible product characteristics",
-            size.reason,
-          ],
+          unitsRequired: assessment.unitsRequired,
+          totalSupplied: assessment.totalSupplied,
+          effectiveTotalPrice: assessment.effectiveTotalPrice,
+          sizeDifferencePercent: assessment.sizeDifferencePercent,
+          matchConfidence: assessment.matchConfidence,
+          matchReasons: assessment.matchReasons,
+          relaxedCriteria: assessment.relaxedCriteria,
+          alternativeReason: assessment.alternativeReason,
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) as ClosestBasketMatch[];
@@ -1236,6 +1513,28 @@ async function findClosestBasketMatches(
     if (closest) matches.set(retailer.id, closest);
   });
   return matches;
+}
+
+export function buildRetailerDiagnostics(
+  retailerList: Array<{ id: string; name: string }>,
+  candidateCounts: Record<string, number>,
+  acceptedCounts: Record<string, number>,
+  selectedCounts: Record<string, number>,
+  rejectionCounts: Record<string, Record<string, number>>,
+) {
+  return Object.fromEntries(retailerList.map((retailer) => {
+    const candidateCount = candidateCounts[retailer.id] || 0;
+    const acceptedCount = acceptedCounts[retailer.id] || 0;
+    return [retailer.id, {
+      candidateCount,
+      acceptedCount,
+      selectedCount: selectedCounts[retailer.id] || 0,
+      emptyReason: acceptedCount ? null : candidateCount
+        ? "Candidates were found, but none were compatible enough to compare."
+        : "No current priced catalogue candidates were found for this retailer.",
+      rejectionReasons: rejectionCounts[retailer.id] || {},
+    }];
+  }));
 }
 
 async function findCatalogue(
@@ -1248,18 +1547,15 @@ async function findCatalogue(
   debug = false,
 ) {
   query = stripRetailerAliases(query);
-  const safetyQuery = semanticSafetyQuery(query);
-  const queryTokens = tokens(query);
+  const intent = parseQueryIntent(query);
+  const queryTokens = tokens(intent.normalizedQuery);
   if (!queryTokens.length) return { products: [], retailerMatches: [], hasMore: false };
-
-  // This broad candidate lookup keeps search flexible when stores phrase a pack
-  // size or product title differently. Fine ranking happens in the Worker.
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
   const strictTerms = coreTokens.length ? coreTokens : queryTokens;
   const candidateLimit = perRetailer > 0
-    ? Math.min(16, Math.max(6, perRetailer + 4))
+    ? Math.min(18, Math.max(8, perRetailer + 6))
     : 12;
-  const [strictResults, profileResult, semanticCandidates] = await Promise.all([
+  const [strictResults, profileResult] = await Promise.all([
     findBalancedProductCandidates(env, strictTerms, retailers, {
       matchAll: true,
       limitPerRetailer: candidateLimit,
@@ -1267,64 +1563,41 @@ async function findCatalogue(
     env.DB.prepare(
       "SELECT term, category, search_text, exclude_terms_json, preferred_terms_json FROM search_profiles",
     ).all<SearchProfileRow>(),
-    findSemanticProductCandidates(env, query),
   ]);
   const profiles = profileResult.results;
   const strictById = new Map(strictResults.map((product) => [product.id, product]));
-  const semanticIds = semanticCandidates.map((candidate) => candidate.productId);
-  if (semanticIds.length) {
-    const placeholders = semanticIds.map(() => "?").join(",");
-    const semanticProducts = await env.DB.prepare(
-      `SELECT id, canonical_name, category, target_size, search_terms_json, search_text
-       FROM catalogue_products WHERE id IN (${placeholders})`,
-    ).bind(...semanticIds).all<ProductRow>();
-    for (const product of semanticProducts.results) strictById.set(product.id, product);
-  }
   const fuzzyProfile = matchingProfile(query, query, profiles);
   const profileTerms = tokens(fuzzyProfile?.term || "");
-  const profileLookupDiffers = profileTerms.length
-    && profileTerms.join("|") !== strictTerms.join("|");
-  if (profileLookupDiffers && strictById.size < retailers.length * 2) {
-    const profileResults = await findBalancedProductCandidates(env, profileTerms, retailers, {
+  const fallbackUsed: string[] = [];
+  const familyTerms = tokens(intent.productFamily);
+  const profileLookupDiffers = profileTerms.length && profileTerms.join("|") !== strictTerms.join("|");
+  const familyLookupDiffers = familyTerms.length && familyTerms.join("|") !== strictTerms.join("|");
+  // A second bounded lookup is intentional: strict wording finds exact items,
+  // while the family/profile lookup recovers retailer titles that omit a
+  // descriptor or use an equivalent phrase. It never scans unbounded rows.
+  if ((familyLookupDiffers || profileLookupDiffers) && strictById.size < retailers.length * 2) {
+    const relaxedTerms = familyLookupDiffers ? familyTerms : profileTerms;
+    const relaxedResults = await findBalancedProductCandidates(env, relaxedTerms, retailers, {
       matchAll: true,
       limitPerRetailer: candidateLimit,
     });
-    for (const product of profileResults) strictById.set(product.id, product);
+    for (const product of relaxedResults) strictById.set(product.id, product);
+    fallbackUsed.push(familyLookupDiffers ? "product-family" : "search-profile");
   }
-  let results = [...strictById.values()];
-  // Only pay for the broad wildcard pass when the strict pass did not already
-  // produce a useful candidate pool. This keeps common searches below the
-  // Worker CPU limit while retaining fuzzy recall for sparse queries.
-  if (queryTokens.length > 1 && strictById.size < retailers.length) {
-    const broadTerms = coreTokens.length ? coreTokens : queryTokens;
-    const broadResults = await findBalancedProductCandidates(env, broadTerms, retailers, {
+  if (strictById.size < retailers.length && intent.discoveryTerms.length) {
+    const broadResults = await findBalancedProductCandidates(env, intent.discoveryTerms, retailers, {
       matchAll: false,
-      limitPerRetailer: Math.max(6, candidateLimit),
+      limitPerRetailer: Math.max(8, candidateLimit),
     });
     for (const product of broadResults) strictById.set(product.id, product);
-    results = [...strictById.values()];
+    fallbackUsed.push("alias-or-fuzzy");
   }
-  const lexicalCandidates = results
-    .map((product) => ({
-      productId: product.id,
-      lexicalScore: Math.max(0, scoreProduct(query, product, profiles)),
-    }))
-    .filter((candidate) => candidate.lexicalScore > 0);
-  const hybridCandidates = mergeHybridCandidates(lexicalCandidates, semanticCandidates);
-  const hybridById = new Map(hybridCandidates.map((candidate) => [candidate.productId, candidate]));
+  const results = [...strictById.values()];
   const scored = results
-    .map((product) => {
-      const candidate = hybridById.get(product.id);
-      const lexicalScore = candidate?.lexicalScore || 0;
-      const semanticScore = candidate?.semanticScore || 0;
-      return {
-        product,
-        score: lexicalScore > 0
-          ? lexicalScore + semanticScoreBonus(semanticScore)
-          : semanticScore,
-      };
-    })
-    .filter((entry) => entry.score > 0)
+    .map((product) => ({
+      product,
+      score: Number((exactQueryCoverage(query, product.search_text) * 30).toFixed(3)),
+    }))
     .sort((a, b) => b.score - a.score || a.product.canonical_name.localeCompare(b.product.canonical_name));
 
   const productIds = scored.map(({ product }) => product.id);
@@ -1350,58 +1623,59 @@ async function findCatalogue(
     }
   }
 
-  const materialized = scored.map(({ product, score }) => ({
-    id: product.id,
-    canonicalName: product.canonical_name,
-    category: product.category || undefined,
-    targetSize: product.target_size || undefined,
-    searchTerms: parseJsonArray(product.search_terms_json),
-    stores: (offerMap.get(product.id) || [])
+  const candidateCounts = Object.fromEntries(retailers.map((retailer) => [retailer.id, 0])) as Record<string, number>;
+  const rejectionCounts = Object.fromEntries(retailers.map((retailer) => [retailer.id, {} as Record<string, number>])) as Record<string, Record<string, number>>;
+  const rejectedSamples: Array<{ retailerId: string; productId: string; productName: string; reason: string }> = [];
+  const rankedMatches = scored.flatMap(({ product, score }) =>
+    (offerMap.get(product.id) || [])
       .filter((offer) => isOfferVisibleAtLocation(offer, location))
-      .map((offer) => offerToStore(offer, location))
-      .sort((left, right) => (left.distanceKm ?? Number.POSITIVE_INFINITY) - (right.distanceKm ?? Number.POSITIVE_INFINITY)),
-    score: Number(score.toFixed(3)),
-  }));
-
-  const rankedMatches = retailers.flatMap((retailer) => materialized
-      .flatMap((product) => product.stores
-        .filter((store) => store.storeId === retailer.id && store.price != null)
-        .filter((store) => semanticCandidatePassesHardRules(query, {
+      .filter((offer) => offer.price_cents != null && offer.price_cents > 0)
+      .map((offer) => {
+        candidateCounts[offer.retailer_id] = (candidateCounts[offer.retailer_id] || 0) + 1;
+        const store = offerToStore(offer, location);
+        const assessment = assessCatalogueMatch(intent, product, store, {
+          lexicalScore: score,
+        });
+        if (!assessment.accepted) {
+          const reason = assessment.rejectionReason || "Insufficient product relevance";
+          rejectionCounts[offer.retailer_id][reason] = (rejectionCounts[offer.retailer_id][reason] || 0) + 1;
+          if (debug && rejectedSamples.length < 30) {
+            rejectedSamples.push({
+              retailerId: offer.retailer_id,
+              productId: product.id,
+              productName: offer.product_name,
+              reason,
+            });
+          }
+          return null;
+        }
+        const productView = {
           id: product.id,
-          canonical_name: product.canonicalName,
-          category: product.category || null,
-          target_size: product.targetSize || null,
-          search_terms_json: JSON.stringify(product.searchTerms || []),
-          search_text: clean([product.canonicalName, product.category, product.targetSize, ...(product.searchTerms || [])].join(" ")),
-        }, store, profiles))
-        .map((store) => ({
-          product,
-          store,
-          matchScore: (() => {
-            const row = {
-              id: product.id,
-              canonical_name: product.canonicalName,
-              category: product.category || null,
-              target_size: product.targetSize || null,
-              search_terms_json: JSON.stringify(product.searchTerms || []),
-              search_text: clean([product.canonicalName, product.category, product.targetSize, ...(product.searchTerms || [])].join(" ")),
-            };
-            const lexicalStoreScore = scoreStore(safetyQuery, row, store, profiles);
-            const semanticScore = hybridById.get(product.id)?.semanticScore || 0;
-            if (lexicalStoreScore > 0) return lexicalStoreScore + semanticScoreBonus(semanticScore);
-            return semanticScore >= MIN_SEMANTIC_SIMILARITY ? semanticScore : -999;
-          })(),
-          comparableValue: comparableStoreValue(query, product, store),
-        }))))
-    .filter((entry) => entry.matchScore > 0)
-    .sort((left, right) => right.matchScore - left.matchScore
-      || right.product.score - left.product.score
+          canonicalName: product.canonical_name,
+          category: product.category || undefined,
+          targetSize: product.target_size || undefined,
+          searchTerms: parseJsonArray(product.search_terms_json),
+          stores: [{ ...store, ...assessment }],
+          score: assessment.matchScore,
+        };
+        return {
+          product: productView,
+          store: productView.stores[0],
+          matchTier: assessment.matchTier,
+          matchScore: assessment.matchScore,
+          comparableValue: assessment.effectiveTotalPrice ?? comparableStoreValue(query, productView, store),
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)))
+    .sort((left, right) => left.matchTier - right.matchTier
+      || right.matchScore - left.matchScore
       || left.comparableValue - right.comparableValue
+      || (left.store.distanceKm ?? Number.POSITIVE_INFINITY) - (right.store.distanceKm ?? Number.POSITIVE_INFINITY)
       || left.store.productName.localeCompare(right.store.productName));
   const seenMatches = new Set<string>();
   const valueRankedMatches = rankedMatches
     .filter((entry) => {
-      const key = `${entry.store.storeId}|${clean(entry.store.productName)}`;
+      const key = `${entry.store.storeId}|${clean(entry.store.productName)}|${clean(entry.store.size)}`;
       if (seenMatches.has(key)) return false;
       seenMatches.add(key);
       return true;
@@ -1414,7 +1688,7 @@ async function findCatalogue(
   ].filter((product) => {
     if (!product) return false;
     const store = product.stores[0];
-    const key = `${store.storeId}|${clean(store.productName)}`;
+    const key = `${store.storeId}|${clean(store.productName)}|${clean(store.size)}`;
     if (leaderKeys.has(key)) return false;
     leaderKeys.add(key);
     return true;
@@ -1423,7 +1697,7 @@ async function findCatalogue(
     ...leaders,
     ...valueRankedMatches.filter((product) => {
       const store = product.stores[0];
-      return !leaderKeys.has(`${store.storeId}|${clean(store.productName)}`);
+      return !leaderKeys.has(`${store.storeId}|${clean(store.productName)}|${clean(store.size)}`);
     }),
   ];
   if (perRetailer > 0) {
@@ -1436,14 +1710,42 @@ async function findCatalogue(
       retailer.id,
       valueRankedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length > retailerStart + perRetailer,
     ]));
+    const acceptedCounts = Object.fromEntries(retailers.map((retailer) => [
+      retailer.id,
+      valueRankedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length,
+    ]));
+    const selectedCounts = Object.fromEntries(retailers.map((retailer) => [
+      retailer.id,
+      groupedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length,
+    ]));
+    const retailerDiagnostics = buildRetailerDiagnostics(
+      retailers,
+      candidateCounts,
+      acceptedCounts,
+      selectedCounts,
+      rejectionCounts,
+    );
     return {
       products: groupedMatches,
       retailerMatches: groupedMatches,
       retailerHasMore,
+      retailerDiagnostics,
       hasMore: Object.values(retailerHasMore).some(Boolean),
       ...(debug ? {
-        semanticSearchApplied: semanticCandidates.length > 0,
-        semanticCandidateCount: semanticCandidates.length,
+        parsedIntent: intent,
+        candidateCounts,
+        rejectedByRetailer: rejectionCounts,
+        rejectedCandidates: rejectedSamples,
+        selectedTiers: groupedMatches.map((product) => ({
+          retailerId: product.stores[0]?.storeId,
+          productId: product.id,
+          tier: product.stores[0]?.matchTier,
+          score: product.stores[0]?.matchScore,
+          scoreBreakdown: product.stores[0]?.scoreBreakdown,
+        })),
+        fallbackUsed,
+        semanticSearchApplied: false,
+        semanticCandidateCount: 0,
       } : {}),
     };
   }
@@ -1454,8 +1756,13 @@ async function findCatalogue(
     retailerMatches: pageMatches,
     hasMore: retailerMatches.length > start + pageSize,
     ...(debug ? {
-      semanticSearchApplied: semanticCandidates.length > 0,
-      semanticCandidateCount: semanticCandidates.length,
+      parsedIntent: intent,
+      candidateCounts,
+      rejectedByRetailer: rejectionCounts,
+      rejectedCandidates: rejectedSamples,
+      fallbackUsed,
+      semanticSearchApplied: false,
+      semanticCandidateCount: 0,
     } : {}),
   };
 }
@@ -1963,6 +2270,15 @@ async function scanBasket(request: Request, env: Env) {
         ? planPackageFulfilment(requestedSize, store.size || store.productName)
         : { valid: false, unitsRequired: 0, totalSupplied: null, reason: "No safe comparable product found" };
       const packageMeasure = store ? parsePackageMeasure(store.size || store.productName) : null;
+      const exactQuantity = Boolean(requestedMeasure && fulfilment.valid && fulfilment.totalSupplied != null
+        && Math.abs(fulfilment.totalSupplied - requestedMeasure.amount) < 0.01);
+      const linkedTier: MatchTier = exactQuantity
+        ? (fulfilment.unitsRequired === 1 ? 1 : 2)
+        : 3;
+      const linkedMatchType = (["exact", "equivalent-quantity", "closest-size"] as const)[linkedTier - 1];
+      const sizeDifferencePercent = requestedMeasure && fulfilment.valid && fulfilment.totalSupplied != null
+        ? Number((Math.abs(fulfilment.totalSupplied - requestedMeasure.amount) / requestedMeasure.amount * 100).toFixed(1))
+        : null;
       const lineTotalCents = fulfilment.valid
         ? calculateBasketLineTotalCents(store?.priceCents ?? null, fulfilment.unitsRequired, quantity)
         : null;
@@ -2003,11 +2319,25 @@ async function scanBasket(request: Request, env: Env) {
         retailerProductId: store?.retailerProductId || null,
         matchScore: linkedOffer ? null : closest?.matchScore ?? null,
         matchConfidence: linkedOffer ? 1 : closest?.matchConfidence ?? null,
+        matchTier: store ? (linkedOffer ? linkedTier : closest?.matchTier ?? 5) : null,
+        matchType: store ? (linkedOffer ? linkedMatchType : closest?.matchType ?? "category-fallback") : null,
         matchReasons: linkedOffer
           ? ["Exact product selected from this retailer", fulfilment.reason]
           : closest?.matchReasons || [],
+        relaxedCriteria: linkedOffer ? [] : closest?.relaxedCriteria || [],
+        requestedSize: requestedMeasure ? displayPackageMeasure(requestedMeasure) : null,
+        offeredSize: store?.size || (packageMeasure ? displayPackageMeasure(packageMeasure) : null),
         unitsRequired: fulfilment.valid ? fulfilment.unitsRequired : null,
         totalSupplied: fulfilment.valid ? fulfilment.totalSupplied : null,
+        effectiveTotalPrice: fulfilment.valid && effectivePrice != null
+          ? Number((effectivePrice * fulfilment.unitsRequired).toFixed(2))
+          : closest?.effectiveTotalPrice ?? null,
+        sizeDifferencePercent: linkedOffer ? sizeDifferencePercent : closest?.sizeDifferencePercent ?? null,
+        isExactMatch: Boolean(store && (linkedOffer ? linkedTier === 1 : closest?.matchTier === 1)),
+        isAlternative: Boolean(store && (linkedOffer ? linkedTier > 1 : (closest?.matchTier || 5) > 1)),
+        alternativeReason: linkedOffer
+          ? (linkedTier > 1 ? fulfilment.reason : null)
+          : closest?.alternativeReason ?? null,
         regularPrice: store?.regularPrice ?? null,
         savings: store?.regularPrice && effectivePrice != null ? Number((store.regularPrice - effectivePrice).toFixed(2)) : null,
         promoText: store?.promoText,

@@ -287,7 +287,7 @@ export default function App() {
     try {
       const payload = await requestJson<CatalogueResponse>(
         apiUrl,
-        `/api/catalogue?q=${encodeURIComponent(query)}&limit=10&page=${page}${locationQuery(settings)}`,
+        `/api/catalogue?q=${encodeURIComponent(query)}&perRetailer=5&page=${page}${locationQuery(settings)}`,
       );
       setCatalogueResults(payload.products || []);
       setCatalogueRetailerMatches(payload.retailerMatches || []);
@@ -774,14 +774,26 @@ function RetailerMatchComparison({
         {ordered.map((product) => {
           const store = product.stores[0];
           if (!store) return null;
+          const tierLabel = ({
+            1: "Exact match",
+            2: "Equivalent quantity",
+            3: "Closest compatible size",
+            4: "Related variant",
+            5: "Category alternative",
+          } as Record<number, string>)[store.matchTier || 5];
           const isSpecial = Boolean(store.promoApplied || (store.regularPrice && store.price && store.regularPrice > store.price));
           return (
             <View key={`${product.id}-${store.storeId}`} style={styles.retailerPriceRow}>
               {store.imageUrl ? <Image resizeMode="contain" source={{ uri: store.imageUrl }} style={styles.retailerThumb} /> : null}
               <View style={styles.flex}>
                 <Text style={styles.retailerName}>{store.storeName}</Text>
+                <Text style={styles.matchTier}>{tierLabel}</Text>
                 <Text numberOfLines={2} style={styles.productName}>{store.productName || product.canonicalName}</Text>
                 <Text style={styles.catalogueMeta}>{store.size || product.targetSize || ""}</Text>
+                {store.unitsRequired && store.unitsRequired > 1 && store.effectiveTotalPrice != null ? (
+                  <Text style={styles.catalogueMeta}>{store.unitsRequired} packs: {money(store.effectiveTotalPrice)}</Text>
+                ) : null}
+                {store.isAlternative && store.alternativeReason ? <Text style={styles.alternativeText}>{store.alternativeReason}</Text> : null}
                 {store.promoText ? <Text numberOfLines={2} style={styles.specialText}>{store.promoText}</Text> : null}
               </View>
               <View style={styles.priceColumn}>
@@ -1477,6 +1489,23 @@ const styles = StyleSheet.create({
     color: "#16241e",
     fontSize: 17,
     fontWeight: "900",
+    marginTop: 2,
+  },
+  matchTier: {
+    alignSelf: "flex-start",
+    backgroundColor: "#e8f5ed",
+    borderRadius: 9,
+    color: "#17694c",
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 3,
+    overflow: "hidden",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  alternativeText: {
+    color: "#785d38",
+    fontSize: 10,
     marginTop: 2,
   },
   specialBadge: {
