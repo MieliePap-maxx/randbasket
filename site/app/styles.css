@@ -1174,6 +1174,11 @@ button:disabled {
   text-align: left;
 }
 
+.catalogue-price-unavailable {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .product-details-name {
   display: block;
   width: 100%;

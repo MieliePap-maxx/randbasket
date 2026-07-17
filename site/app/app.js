@@ -543,7 +543,6 @@ function renderCatalogueResults() {
   const seenMatches = new Set();
   const matches = retailerMatches
     .flatMap((product) => (product.stores || [])
-      .filter((store) => store.price != null)
       .map((store) => ({ product, store, comparison: getUnitComparison(product, store) })))
     .filter(({ product, store }) => {
       const key = `${store.storeId}|${store.url || product.id}|${store.price}`;
@@ -634,6 +633,9 @@ function renderCatalogueResults() {
       const productName = cleanDisplayText(store.productName || product.canonicalName) || "Product";
       const link = store.url ? `<a href="${escapeAttr(store.url)}" target="_blank" rel="noopener">View retailer product</a>` : "";
       const existing = matchingBasketItem(store, product);
+      const price = store.price == null
+        ? `<strong class="catalogue-price-unavailable">Price unavailable</strong>`
+        : `${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${effectivePrice}`;
       article.innerHTML = `
         ${productImageMarkup(store.imageUrl, productName, "catalogue-image", true)}
         <div class="catalogue-product-copy">
@@ -645,7 +647,7 @@ function renderCatalogueResults() {
           ${alternative}
           ${link}
         </div>
-        <div class="catalogue-price">${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${effectivePrice}${quantityControlMarkup(existing, productName, true)}</div>
+        <div class="catalogue-price">${price}${quantityControlMarkup(existing, productName, true)}</div>
       `;
       const imageButton = article.querySelector(".product-image-button");
       const detailsTriggers = [imageButton, article.querySelector(".product-details-name")].filter(Boolean);
@@ -1393,7 +1395,7 @@ init().catch((error) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=31", { updateViaCache: "none" })
+      .register("./service-worker.js?v=32", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });

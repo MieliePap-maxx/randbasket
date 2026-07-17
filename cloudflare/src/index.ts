@@ -1531,7 +1531,7 @@ export function buildRetailerDiagnostics(
       selectedCount: selectedCounts[retailer.id] || 0,
       emptyReason: acceptedCount ? null : candidateCount
         ? "Candidates were found, but none were compatible enough to compare."
-        : "No current priced catalogue candidates were found for this retailer.",
+        : "No current catalogue candidates were found for this retailer.",
       rejectionReasons: rejectionCounts[retailer.id] || {},
     }];
   }));
@@ -1629,7 +1629,6 @@ async function findCatalogue(
   const rankedMatches = scored.flatMap(({ product, score }) =>
     (offerMap.get(product.id) || [])
       .filter((offer) => isOfferVisibleAtLocation(offer, location))
-      .filter((offer) => offer.price_cents != null && offer.price_cents > 0)
       .map((offer) => {
         candidateCounts[offer.retailer_id] = (candidateCounts[offer.retailer_id] || 0) + 1;
         const store = offerToStore(offer, location);
@@ -1669,6 +1668,7 @@ async function findCatalogue(
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)))
     .sort((left, right) => left.matchTier - right.matchTier
       || right.matchScore - left.matchScore
+      || Number(left.store.price == null) - Number(right.store.price == null)
       || left.comparableValue - right.comparableValue
       || (left.store.distanceKm ?? Number.POSITIVE_INFINITY) - (right.store.distanceKm ?? Number.POSITIVE_INFINITY)
       || left.store.productName.localeCompare(right.store.productName));

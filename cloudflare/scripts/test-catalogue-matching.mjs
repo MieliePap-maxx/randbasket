@@ -572,6 +572,6 @@ const diagnostics = buildRetailerDiagnostics(
 assert.equal(diagnostics["pick-n-pay"].emptyReason, null);
 assert.match(diagnostics.checkers.emptyReason, /none were compatible/i);
 assert.equal(diagnostics.checkers.rejectionReasons["Different product family (bread)"], 3);
-assert.match(diagnostics.woolworths.emptyReason, /No current priced catalogue candidates/i);
+assert.match(diagnostics.woolworths.emptyReason, /No current catalogue candidates/i);
 
 console.log("Catalogue comparison matching tests passed.");
