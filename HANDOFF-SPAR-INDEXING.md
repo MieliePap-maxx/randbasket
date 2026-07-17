@@ -4,6 +4,8 @@
 
 Work is on branch `seo-release` in this repository. The pending top commit contains the complete SPAR catalogue index and the UI/API support needed to show catalogue products even when SPAR has not published a current price.
 
+The latest follow-up also keeps the Ease of Access weekly-staple selector visible after basket items are added, adds Flour, rejects staple-search false positives such as milk chocolate, milk rolls, quail eggs, bread flour and prepared mince, and adds a checked-in Makro search plan plus resumable D1 batch importer.
+
 The official SPAR own-brand catalogue was enumerated from:
 
 `https://www.spar.co.za/Assets/Our-Brands/In-Store/Our-Brands-Microsite/Products`
@@ -68,6 +70,21 @@ The simplest route with the existing Cloudflare Git build is:
 
 The one-time command uses the existing `randbasket-catalogue` D1 binding and the checked-in `data/spar-own-brand-import.sql`. No Vectorize index, AI binding, new database or new secret is required.
 
+### 2b. Populate Makro's priced staple catalogue
+
+Makro data is not bundled because its prices change and its site can require a human-verification check. In Cloudflare's Worker build settings, temporarily use this deploy command:
+
+`npm run catalogue:makro:crawl && npm run deploy:with-catalogues`
+
+This command:
+
+1. Searches Makro's current public catalogue, starting with milk, eggs, bread, beef mince, chicken and flour.
+2. Refuses to continue unless all six basic staple searches returned products.
+3. Imports the Makro batches and the full SPAR product catalogue into the existing D1 database.
+4. Deploys the Worker only after both imports succeed.
+
+After one successful run, restore the normal deploy command to `npx wrangler deploy`. Run the catalogue command again whenever Makro prices need refreshing. If the build reports Makro human verification, wait and retry later; do not publish guessed prices.
+
 Cloudflare's documented direct CLI equivalent is:
 
 ```powershell
@@ -79,11 +96,13 @@ Use the Git-build route above if `npx` is not available in the local terminal.
 
 ### 3. Verify production
 
-Open:
+Open both:
 
 `https://api.randbasket.co.za/v1/catalogue?q=eggs%2018&perRetailer=5`
 
-Then search `eggs 18` on RandBasket. The SPAR column should contain compatible SPAR egg products. Catalogue-only items must say `Price unavailable`; an item should only show a rand amount when a current regional special or store-aware price exists.
+`https://api.randbasket.co.za/v1/catalogue?q=milk&perRetailer=5`
+
+Then search `milk`, `eggs`, `bread`, `beef mince`, `chicken` and `flour` on RandBasket. The SPAR column should contain compatible product-only entries, and the Makro column should contain current priced results from the successful crawl. Catalogue-only items must say `Price unavailable`; an item should only show a rand amount when a current regional special or store-aware price exists.
 
 ## Important limitation
 

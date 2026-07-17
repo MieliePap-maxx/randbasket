@@ -1164,6 +1164,25 @@ function severeIncompatibility(intent: QueryIntent, offerText: string, offeredFa
   if (intent.productFamily === "milk") {
     const plantMilk = /\b(?:almond|oat|soy|soya|coconut|rice)\s+(?:drink|milk)\b/;
     if (plantMilk.test(intent.normalizedQuery) !== plantMilk.test(offerText)) return "Plant and dairy milk are incompatible";
+    const flavour = /\b(?:chocolate|strawberry|vanilla|banana|flavou?red)\b/;
+    if (!flavour.test(intent.normalizedQuery) && flavour.test(offerText)) return "Flavoured milk is not plain milk";
+    if (/\b(?:chocolate bars?|slabs?|sweets?|candy|biscuits?|cookies?|milk rolls?|dessert)\b/.test(offerText)) {
+      return "Milk confectionery is not grocery milk";
+    }
+  }
+  if (intent.productFamily === "bread"
+    && /\b(?:bread flour|breadcrumbs?|bread crumbs?|bread mix|bread knife|bread bin|bread maker)\b/.test(offerText)) {
+    return "A bread ingredient or accessory is not a loaf of bread";
+  }
+  if (intent.productFamily === "eggs"
+    && !/\b(?:quail|pickled|powdered|chocolate)\b/.test(intent.normalizedQuery)
+    && /\b(?:quail|pickled|powdered|chocolate)\b/.test(offerText)) {
+    return "Speciality egg products are not standard eggs";
+  }
+  if (intent.productFamily === "mince"
+    && !processedMinceTerms(intent.normalizedQuery).length
+    && processedMinceTerms(offerText).length) {
+    return "Prepared or pet mince is not plain mince";
   }
   const offeredMeasure = parsePackageMeasure(offerText);
   if (intent.requestedSize && offeredMeasure && intent.requestedSize.kind !== offeredMeasure.kind) {

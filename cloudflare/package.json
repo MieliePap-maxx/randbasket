@@ -6,6 +6,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:with-spar": "wrangler d1 execute randbasket-catalogue --remote --file=data/spar-own-brand-import.sql && wrangler deploy",
+    "deploy:with-catalogues": "wrangler d1 execute randbasket-catalogue --remote --file=data/spar-own-brand-import.sql && node scripts/apply-d1-import-directory.mjs .wrangler/makro-catalogue && wrangler deploy",
     "test:matching": "node scripts/test-catalogue-matching.mjs",
     "vector:index": "node scripts/index-product-vectors.mjs",
     "vector:verify": "node scripts/verify-product-vectors.mjs",
@@ -13,6 +14,8 @@
     "catalogue:export": "node scripts/export-catalogue-import.mjs",
     "catalogue:spar:crawl": "node scripts/crawl-spar-own-brand-catalogue.mjs data/spar-own-brand-catalogue.json",
     "catalogue:spar:export": "node scripts/export-spar-own-brand-import.mjs data/spar-own-brand-catalogue.json data/spar-own-brand-import.sql",
+    "catalogue:makro:crawl": "node scripts/import-makro-public-catalogue.mjs data/popular-search-profiles.json .wrangler/makro-catalogue 34 1800 0",
+    "catalogue:makro:apply": "node scripts/apply-d1-import-directory.mjs .wrangler/makro-catalogue",
     "catalogue:woolworths-promotions": "node scripts/export-woolworths-promotions-import.mjs .wrangler/woolworths-promotions"
   },
   "devDependencies": {

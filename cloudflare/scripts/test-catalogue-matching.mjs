@@ -491,6 +491,31 @@ assert.equal(assessCatalogueMatch(
   genericMilkProduct,
   { productName: "Full Cream Fresh Milk 2L", size: "2 L", price: 35 },
 ).accepted, false, "required dietary characteristics must not be relaxed");
+assert.equal(assessCatalogueMatch(
+  "milk",
+  { ...genericMilkProduct, canonical_name: "Nestle Aero Milk Chocolate", category: "Confectionery", search_text: "milk chocolate bar" },
+  { productName: "Nestle Aero Milk Chocolate Bar 40g", size: "40 g", price: 16.99 },
+).accepted, false, "plain milk search must reject milk chocolate");
+assert.equal(assessCatalogueMatch(
+  "milk",
+  { ...genericMilkProduct, canonical_name: "Milk Rolls", category: "Bakery", search_text: "milk rolls bakery" },
+  { productName: "Milk Rolls 6 Pack", size: "6 pack", price: 29.99 },
+).accepted, false, "plain milk search must reject milk rolls");
+assert.equal(assessCatalogueMatch(
+  "eggs",
+  { ...genericMilkProduct, canonical_name: "Pickled Quail Eggs", category: "Dairy", search_text: "pickled quail eggs" },
+  { productName: "Pickled Quail Eggs 290g", size: "290 g", price: 109.99 },
+).accepted, false, "generic eggs search must reject speciality egg products");
+assert.equal(assessCatalogueMatch(
+  "bread",
+  { ...genericMilkProduct, canonical_name: "Bread Flour", category: "Pantry", search_text: "bread flour" },
+  { productName: "Stoneground Bread Flour 2.5kg", size: "2.5 kg", price: 49.99 },
+).accepted, false, "bread search must reject bread flour");
+assert.equal(assessCatalogueMatch(
+  "mince",
+  { ...genericMilkProduct, canonical_name: "Savoury Mince", category: "Prepared meals", search_text: "savoury mince with vegetables" },
+  { productName: "Savoury Mince With Vegetables 400g", size: "400 g", price: 54.99 },
+).accepted, false, "plain mince search must reject prepared mince dishes");
 
 for (const [query, family, category] of intentCases) {
   const product = {

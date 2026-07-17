@@ -58,6 +58,7 @@ function imageUrl(value) {
 
 let missingStateStreak = 0;
 let successfulTerms = 0;
+const termProductCounts = {};
 for (let index = 0; index < terms.length; index += 1) {
   const term = terms[index];
   const profile = profileByTerm.get(term);
@@ -76,6 +77,8 @@ for (let index = 0; index < terms.length; index += 1) {
       const title = String(value.titles?.title || value.titles?.newTitle || "").trim();
       const price = Number(value.pricing?.finalPrice?.value);
       if (!title || !Number.isFinite(price) || price <= 0) continue;
+      const titleText = clean(title);
+      if ((profile?.exclude || []).some((word) => titleText.includes(clean(word)))) continue;
       const id = `makro-${String(value.id).toLowerCase()}`;
       const existing = products.get(id);
       const searchTerms = new Set(existing?.searchTerms || []);
@@ -100,6 +103,7 @@ for (let index = 0; index < terms.length; index += 1) {
       });
       found += 1;
     }
+    termProductCounts[term] = found;
     console.log(`[${index + 1}/${terms.length}] ${term}: ${found} priced products (${products.size} unique)`);
   } catch (error) {
     console.warn(`[${index + 1}/${terms.length}] ${term}: ${error.message}`);
@@ -143,6 +147,7 @@ await writeFile(join(outputDir, "manifest.json"), JSON.stringify({
   termOffset,
   requestedTerms: terms.length,
   successfulTerms,
+  termProductCounts,
   products: rows.length,
   vocabularyTerms: vocabulary.size,
   files,

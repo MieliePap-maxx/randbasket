@@ -321,7 +321,8 @@ function renderItems() {
   const body = $("#itemsBody");
   body.innerHTML = "";
   state.items.forEach((item) => body.appendChild(itemRow(item)));
-  $("#emptyBasket").hidden = state.items.length > 0;
+  // The weekly-staple shortcuts are permanent ease-of-access controls, not an empty state.
+  $("#emptyBasket").hidden = false;
   $(".table-wrap").hidden = state.items.length === 0;
 }
 
@@ -1395,7 +1396,7 @@ init().catch((error) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=32", { updateViaCache: "none" })
+      .register("./service-worker.js?v=33", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });
