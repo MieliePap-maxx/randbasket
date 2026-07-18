@@ -17,6 +17,7 @@ import {
   fuzzyQueryCoverage,
   fuzzyTokenSimilarity,
   inferredCategoryFamily,
+  isCatalogueOfferUsable,
   levenshteinDistance,
   matchesSearchTerm,
   mergeHybridCandidates,
@@ -516,10 +517,20 @@ assert.equal(assessCatalogueMatch(
   { productName: "Pickled Quail Eggs 290g", size: "290 g", price: 109.99 },
 ).accepted, false, "generic eggs search must reject speciality egg products");
 assert.equal(assessCatalogueMatch(
+  "large eggs 18 pack",
+  { ...genericMilkProduct, canonical_name: "Butternut 2 pk", category: "Dairy", search_text: "butternut 2 pk dairy" },
+  { productName: "Butternut 2 pk", size: "2 ea", price: 32.99 },
+).accepted, false, "known product families must not fall back to a broad mislabelled category");
+assert.equal(assessCatalogueMatch(
   "bread",
   { ...genericMilkProduct, canonical_name: "Bread Flour", category: "Pantry", search_text: "bread flour" },
   { productName: "Stoneground Bread Flour 2.5kg", size: "2.5 kg", price: 49.99 },
 ).accepted, false, "bread search must reject bread flour");
+assert.equal(assessCatalogueMatch(
+  "breakfast cereal",
+  { ...genericMilkProduct, canonical_name: "Jungle Energy Bar", category: "Pantry", search_text: "jungle energy bar breakfast cereal" },
+  { productName: "Jungle Energy Bar 40g", size: "40 g", price: 13.95 },
+).accepted, false, "breakfast cereal search must reject snack bars");
 assert.equal(assessCatalogueMatch(
   "mince",
   { ...genericMilkProduct, canonical_name: "Savoury Mince", category: "Prepared meals", search_text: "savoury mince with vegetables" },
@@ -592,13 +603,18 @@ assert.doesNotMatch(balancedCalls[0].sql, /UNION ALL/, "catalogue discovery must
 assert.match(balancedCalls[0].sql, /JOIN catalogue_offers/, "catalogue discovery should use the indexed product-offer relationship");
 assert.match(balancedCalls[0].sql, /ROW_NUMBER\(\) OVER/, "catalogue discovery should rank candidates per retailer");
 assert.match(balancedCalls[0].sql, /PARTITION BY retailer_id/, "candidate limits must be applied independently to every retailer");
+assert.match(balancedCalls[0].sql, /COALESCE\(o\.price_cents, 0\) > 0/, "stale zero-price rows must not consume priced-retailer candidate slots");
 assert.match(balancedCalls[0].sql, /retailer_rank <= 24/, "each retailer should retain its bounded candidate allowance");
-assert.match(balancedCalls[0].sql, /LIMIT 160/, "candidate discovery must remain globally bounded");
+assert.match(balancedCalls[0].sql, /LIMIT 240/, "candidate discovery must remain globally bounded");
 assert.deepEqual(balancedCalls[0].bindings, [
   "pick-n-pay", "checkers", "woolworths", "spar", "makro",
   "%full%", "%cream%", "%milk%",
 ]);
 assert.deepEqual(balancedProducts.map((product) => product.id), ["milk-a", "milk-b"]);
+assert.equal(isCatalogueOfferUsable({ retailer_id: "pick-n-pay", price_cents: 0 }), false);
+assert.equal(isCatalogueOfferUsable({ retailer_id: "woolworths", price_cents: null }), false);
+assert.equal(isCatalogueOfferUsable({ retailer_id: "makro", price_cents: 1099 }), true);
+assert.equal(isCatalogueOfferUsable({ retailer_id: "spar", price_cents: null }), true);
 
 await findBalancedProductCandidates({
   DB: {

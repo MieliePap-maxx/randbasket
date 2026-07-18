@@ -8,6 +8,15 @@ Pick n Pay, Checkers, Woolworths, SPAR, and Makro are represented in the API and
 
 Makro public search/category pages expose priced product cards without requiring protected product-page reads. Import them in small resumable batches with `npm run catalogue:makro:crawl`; the checked-in search plan starts with milk, eggs, bread, beef mince, chicken and flour, covers common grocery and household categories, filters obvious non-food false positives, stops when Makro verification appears and supports a term offset for a later run. Apply a successful batch with `npm run catalogue:makro:apply`. Refresh SPAR's product-only index with `npm run catalogue:spar:crawl`, generate its idempotent D1 import with `npm run catalogue:spar:export`, then execute `data/spar-own-brand-import.sql` against `randbasket-catalogue`. Product-only entries are deliberately retained with a missing price so shoppers can identify and add them while RandBasket waits for a current regional or store price.
 
+For broader Makro food coverage, `scripts/import-makro-category-catalogue.mjs` derives 232 unique food searches from Makro's own `sitemap_s_store-browse.xml.gz`. It writes idempotent D1 batches plus a manifest containing incomplete offsets and the exact next offset. Run small batches because Makro can activate human verification:
+
+```powershell
+node scripts/import-makro-category-catalogue.mjs .wrangler\makro-category-batch-000 20 1800 0 4
+node scripts/apply-d1-import-directory.mjs .wrangler\makro-category-batch-000
+```
+
+If `verificationStopped` is true, wait for normal browser access to recover and restart from `nextCategoryOffset`. Do not apply an empty manifest, skip an incomplete offset, bypass verification, or manufacture missing prices.
+
 ## Public website deployment
 
 The Cloudflare Pages project should use the repository root with no build command and `site` as its build output directory. The public price checker is available at `/app/` and calls `https://api.randbasket.co.za` directly. Attach both `randbasket.co.za` and `www.randbasket.co.za` to the Pages project.

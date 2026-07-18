@@ -13,13 +13,21 @@ const files = (manifest.files || []).filter((file) => String(file).toLowerCase()
 if (!files.length || !Number(manifest.products)) {
   throw new Error("The catalogue import is empty. Do not deploy until the retailer crawl succeeds.");
 }
-const requiredStaples = ["milk", "eggs", "bread", "beef mince", "chicken", "flour"];
-const missingStaples = requiredStaples.filter((term) => !Number(manifest.termProductCounts?.[term]));
-if (missingStaples.length) {
-  throw new Error(`The Makro crawl did not cover every basic staple (${missingStaples.join(", ")}). Retry after human verification clears.`);
+if (manifest.source === "makro-category-sitemap") {
+  if (!Number(manifest.successfulCategories)) {
+    throw new Error("The Makro category crawl did not complete any category pages.");
+  }
+} else {
+  const requiredStaples = ["milk", "eggs", "bread", "beef mince", "chicken", "flour"];
+  const missingStaples = requiredStaples.filter((term) => !Number(manifest.termProductCounts?.[term]));
+  if (missingStaples.length) {
+    throw new Error(`The Makro crawl did not cover every basic staple (${missingStaples.join(", ")}). Retry after human verification clears.`);
+  }
 }
 
-const wranglerEntry = join(process.cwd(), "node_modules", "wrangler", "bin", "wrangler.js");
+const wranglerEntry = process.env.WRANGLER_ENTRY
+  ? resolve(process.env.WRANGLER_ENTRY)
+  : join(process.cwd(), "node_modules", "wrangler", "bin", "wrangler.js");
 await access(wranglerEntry);
 
 function applyFile(file) {

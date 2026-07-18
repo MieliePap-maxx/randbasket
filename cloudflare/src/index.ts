@@ -906,6 +906,14 @@ function isOfferVisibleAtLocation(offer: OfferRow, location?: ShopperLocation) {
   return distance != null && distance <= 120;
 }
 
+export function isCatalogueOfferUsable(offer: Pick<OfferRow, "retailer_id" | "price_cents">) {
+  // SPAR's public catalogue intentionally includes product-only records while
+  // regional prices are collected. The other retailers publish priced online
+  // catalogues, so zero-price legacy rows are stale placeholders and should
+  // never displace a current result or enter a comparison basket.
+  return offer.retailer_id === "spar" || Number(offer.price_cents) > 0;
+}
+
 function offerToStore(offer: OfferRow, location?: ShopperLocation) {
   const price = offer.price_cents && offer.price_cents > 0 ? centsToPrice(offer.price_cents) : null;
   const normalizedPrice = offer.normalized_price_cents && offer.normalized_price_cents > 0
@@ -1195,6 +1203,11 @@ function severeIncompatibility(intent: QueryIntent, offerText: string, offeredFa
     && /\b(?:bread flour|breadcrumbs?|bread crumbs?|bread mix|bread knife|bread bin|bread maker)\b/.test(offerText)) {
     return "A bread ingredient or accessory is not a loaf of bread";
   }
+  if (intent.productFamily === "cereal"
+    && !/\bbars?\b/.test(intent.normalizedQuery)
+    && /\b(?:energy|protein|snack|cereal)\s+bars?\b/.test(offerText)) {
+    return "A snack bar is not breakfast cereal";
+  }
   if (intent.productFamily === "eggs"
     && !/\b(?:quail|pickled|powdered|chocolate)\b/.test(intent.normalizedQuery)
     && /\b(?:quail|pickled|powdered|chocolate)\b/.test(offerText)) {
@@ -1324,7 +1337,12 @@ export function assessCatalogueMatch(
     characteristicMatches ? `${characteristicMatches} requested characteristic${characteristicMatches === 1 ? "" : "s"} matched` : "Core product wording matched",
   ];
   return {
-    accepted: familyMatch || categoryMatch || (!intent.productFamily && lexicalCoverage >= 0.55),
+    // Once the request resolves to a known product family, a broad category is
+    // not enough. This prevents records mislabelled as Dairy (for example,
+    // butternut) from becoming substitutes for eggs or milk.
+    accepted: intent.productFamily
+      ? familyMatch
+      : categoryMatch || lexicalCoverage >= 0.55,
     rejectionReason: null,
     matchTier,
     matchType,
@@ -1438,8 +1456,8 @@ export async function findBalancedProductCandidates(
   const terms = [...new Set(searchTerms.filter(Boolean))].slice(0, 8);
   if (!terms.length || !targetRetailers.length) return [] as ProductRow[];
   const operator = options.matchAll === false ? " OR " : " AND ";
-  const perRetailerLimit = Math.min(30, Math.max(1, Math.round(options.limitPerRetailer || 16)));
-  const globalLimit = Math.min(160, perRetailerLimit * targetRetailers.length * 2);
+  const perRetailerLimit = Math.min(60, Math.max(1, Math.round(options.limitPerRetailer || 24)));
+  const globalLimit = Math.min(320, perRetailerLimit * targetRetailers.length * 2);
   const retailerBindings = targetRetailers.map((_, index) => `?${index + 1}`);
   const termOffset = targetRetailers.length;
   const searchClauses = terms
@@ -1467,6 +1485,7 @@ export async function findBalancedProductCandidates(
        JOIN catalogue_offers o ON o.product_id = p.id
        WHERE (${searchClauses})
          AND o.retailer_id IN (${retailerBindings.join(",")})
+         AND (o.retailer_id = 'spar' OR COALESCE(o.price_cents, 0) > 0)
      ), ranked_retailer_products AS (
        SELECT
          id, canonical_name, category, target_size, search_terms_json, search_text,
@@ -1549,6 +1568,7 @@ async function findClosestBasketMatches(
 
   enabledRetailers.forEach((retailer) => {
     const ranked = (offersByRetailer.get(retailer.id) || [])
+      .filter(isCatalogueOfferUsable)
       .filter((offer) => isOfferVisibleAtLocation(offer, location))
       .map((offer) => {
         const row = productsById.get(offer.product_id);
@@ -1623,8 +1643,8 @@ async function findCatalogue(
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
   const strictTerms = coreTokens.length ? coreTokens : queryTokens;
   const candidateLimit = perRetailer > 0
-    ? 30
-    : 24;
+    ? Math.min(60, Math.max(30, page * perRetailer + perRetailer))
+    : 36;
   const [strictResults, profileResult] = await Promise.all([
     findBalancedProductCandidates(env, strictTerms, retailers, {
       matchAll: true,
@@ -1646,7 +1666,7 @@ async function findCatalogue(
   // A second bounded lookup is intentional: strict wording finds exact items,
   // while the family/profile lookup recovers retailer titles that omit a
   // descriptor or use an equivalent phrase. It never scans unbounded rows.
-  if ((familyLookupDiffers || profileLookupDiffers) && strictById.size < retailers.length * 2) {
+  if (familyLookupDiffers || profileLookupDiffers) {
     const relaxedTerms = familyLookupDiffers ? familyTerms : profileTerms;
     const relaxedResults = await findBalancedProductCandidates(env, relaxedTerms, retailers, {
       matchAll: true,
@@ -1701,6 +1721,7 @@ async function findCatalogue(
   const rejectedSamples: Array<{ retailerId: string; productId: string; productName: string; reason: string }> = [];
   const rankedMatches = scored.flatMap(({ product, score }) =>
     (offerMap.get(product.id) || [])
+      .filter(isCatalogueOfferUsable)
       .filter((offer) => isOfferVisibleAtLocation(offer, location))
       .map((offer) => {
         candidateCounts[offer.retailer_id] = (candidateCounts[offer.retailer_id] || 0) + 1;
