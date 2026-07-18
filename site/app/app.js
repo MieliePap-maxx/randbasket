@@ -1,6 +1,7 @@
-const APP_SHELL_VERSION = "31";
+const APP_SHELL_VERSION = "35";
 const appShellReady = Boolean(
   window.RandBasketCore
+  && window.RandBasketLocation
   && document.getElementById("productDetailsDialog")
   && document.getElementById("specialsToggle")
   && document.getElementById("locationDialog"),
@@ -35,6 +36,7 @@ const state = {
 };
 
 const { availableProductDetails, matchingBasketItem: findMatchingBasketItem, nextQuantity, wholeQuantity } = window.RandBasketCore;
+const locationSession = window.RandBasketLocation;
 const quantityUpdates = new Set();
 let lastProductDetailsTrigger = null;
 
@@ -87,9 +89,7 @@ function formatMoney(value) {
 }
 
 function locationQuery() {
-  const location = state.settings.location;
-  if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) return "";
-  return `&latitude=${encodeURIComponent(location.latitude)}&longitude=${encodeURIComponent(location.longitude)}`;
+  return locationSession.query(state.settings.location);
 }
 
 function renderLocation() {
@@ -108,36 +108,39 @@ function saveDeviceState() {
   }));
 }
 
-function requestLocation() {
+async function requestLocation() {
   if (!("geolocation" in navigator)) {
     $("#locationStatus").textContent = "Location is unavailable in this browser";
     return;
   }
   $("#locationStatus").textContent = "Waiting for permission...";
-  navigator.geolocation.getCurrentPosition((position) => {
+  try {
+    const location = await locationSession.request();
     state.settings.locationPermission = "granted";
-    state.settings.location = {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-      accuracy: position.coords.accuracy,
-      updatedAt: new Date().toISOString(),
-    };
+    state.settings.location = locationSession.write(location);
+    locationSession.setPermission("granted");
     saveDeviceState();
     renderLocation();
+    if (state.catalogueQuery) void searchCatalogue(1);
+    if (state.specialsLoaded) void loadSpecials();
     if (state.items.length) scheduleBasketScan(150);
     if ($("#locationDialog").open) $("#locationDialog").close();
-  }, (error) => {
-    state.settings.locationPermission = error.code === error.PERMISSION_DENIED ? "denied" : "unavailable";
+  } catch (error) {
+    state.settings.locationPermission = Number(error?.code) === 1 ? "denied" : "unavailable";
+    locationSession.setPermission(state.settings.locationPermission);
     saveDeviceState();
-    $("#locationStatus").textContent = error.code === error.PERMISSION_DENIED
+    $("#locationStatus").textContent = Number(error?.code) === 1
       ? "Permission declined - national prices will be used"
       : "Could not determine your location";
     if ($("#locationDialog").open) $("#locationDialog").close();
-  }, { enableHighAccuracy: false, maximumAge: 900000, timeout: 12000 });
+  }
 }
 
 function declineLocation() {
   state.settings.locationPermission = "declined";
+  delete state.settings.location;
+  locationSession.clear();
+  locationSession.setPermission("declined");
   saveDeviceState();
   if ($("#locationDialog").open) $("#locationDialog").close();
   renderLocation();
@@ -1364,7 +1367,9 @@ async function init() {
     maxResultsPerStore: 5,
     stores: Object.fromEntries(defaultStores.map((store) => [store.id, true])),
   };
-  delete state.settings.location;
+  const sessionLocation = locationSession.read();
+  if (sessionLocation) state.settings.location = sessionLocation;
+  else delete state.settings.location;
   state.stores = defaultStores;
   state.latest = saved.latest || null;
   importSharedBasket();
@@ -1383,8 +1388,10 @@ async function init() {
     openFeedback();
   } else if (window.location.hash === "#specials") {
     setSpecialsOpen(true);
-  } else if (!state.settings.locationPermission) {
+  } else if (!state.settings.locationPermission || state.settings.locationPermission === "unavailable") {
     $("#locationDialog").showModal();
+  } else if (state.settings.locationPermission === "granted" && !state.settings.location) {
+    void requestLocation();
   }
 }
 
@@ -1393,10 +1400,23 @@ init().catch((error) => {
   console.error(error);
 });
 
+locationSession.subscribe((location) => {
+  if (location) {
+    state.settings.location = location;
+    state.settings.locationPermission = "granted";
+  } else {
+    delete state.settings.location;
+  }
+  renderLocation();
+  if (state.catalogueQuery) void searchCatalogue(1);
+  if (state.specialsLoaded) void loadSpecials();
+  if (state.items.length) scheduleBasketScan(150);
+});
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=33", { updateViaCache: "none" })
+      .register("./service-worker.js?v=35", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });

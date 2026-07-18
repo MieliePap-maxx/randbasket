@@ -1,4 +1,4 @@
-const CACHE_NAME = "randbasket-web-v33";
+const CACHE_NAME = "randbasket-web-v35";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -6,7 +6,8 @@ const STATIC_ASSETS = [
   "./comparison-core.js",
   "./app.js",
   "./manifest.webmanifest",
-  "./icon.svg"
+  "./icon.svg",
+  "../location-session.js"
 ];
 
 self.addEventListener("install", (event) => {

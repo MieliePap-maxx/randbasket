@@ -11,7 +11,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
     <link rel="apple-touch-icon" href="/favicon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=9" />
+    <link rel="stylesheet" href="styles.css?v=10" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RandBasket" />
     <meta property="og:title" content="RandBasket | Compare Grocery Prices in South Africa" />
@@ -198,11 +198,29 @@
       </section>
     </main>
 
+    <dialog id="siteLocationDialog" class="site-location-dialog" aria-labelledby="siteLocationTitle">
+      <div class="site-location-card">
+        <div class="site-location-mark" aria-hidden="true">R</div>
+        <div>
+          <p class="eyebrow">Local prices</p>
+          <h2 id="siteLocationTitle">May RandBasket use your location?</h2>
+          <p><strong>Why we ask:</strong> SPAR and other grocers can publish different prices and specials at different branches. Your approximate location helps RandBasket select offers from stores near you.</p>
+          <p class="site-location-privacy"><strong>Your privacy:</strong> Your coordinates are kept only for this browsing session. We do not add them to your basket, create a location history, or track you in the background.</p>
+          <p id="siteLocationStatus" class="site-location-status" aria-live="polite"></p>
+        </div>
+        <div class="site-location-actions">
+          <button class="button secondary" id="siteLocationDecline" type="button">Not now</button>
+          <button class="button primary" id="siteLocationAllow" type="button">Use my location</button>
+        </div>
+      </div>
+    </dialog>
+
     <footer>
       <span>RandBasket</span>
       <span>Prices may vary by location, availability, retailer terms and specials.</span>
       <span><a href="about.html">About</a><a href="methodology.html">Methodology</a><a href="faq.html">FAQ</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="support.html">Support</a></span>
     </footer>
+    <script src="location-session.js?v=1"></script>
     <script>
       const heroMoney = new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" });
       const heroStoreAliases = {
@@ -223,6 +241,10 @@
         makro: "Makro"
       };
       const heroRows = [...document.querySelectorAll("[data-hero-store]")];
+      const heroLocation = window.RandBasketLocation;
+      const heroLocationDialog = document.querySelector("#siteLocationDialog");
+      let heroRequestSequence = 0;
+      let displayedLocationSignature = "";
       const normaliseHeroStore = (store) => {
         const raw = String(store.storeId || store.id || store.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         return heroStoreAliases[raw] || raw;
@@ -237,12 +259,25 @@
         const unit = multipack ? match[3] : match[2];
         return Number.isFinite(amount) && amount > 0 ? amount * (unit === "l" ? 1000 : 1) : null;
       };
-      fetch(`https://api.randbasket.co.za/v1/catalogue?q=${encodeURIComponent("full cream milk 2l")}&limit=30&page=1&perRetailer=6`)
-        .then((response) => {
+      const locationSignature = (location) => location
+        ? `${Number(location.latitude).toFixed(4)},${Number(location.longitude).toFixed(4)}`
+        : "national";
+      const resetHeroRows = () => heroRows.forEach((row) => {
+        row.classList.remove("best", "unavailable");
+        row.querySelector("strong").textContent = "Finding match...";
+      });
+      const loadHeroComparison = async (location = heroLocation.read()) => {
+        const requestId = ++heroRequestSequence;
+        displayedLocationSignature = locationSignature(location);
+        resetHeroRows();
+        document.querySelector("#heroComparisonStatus").textContent = location
+          ? "Checking live listed prices near you..."
+          : "Matching national listed prices...";
+        try {
+          const response = await fetch(`https://api.randbasket.co.za/v1/catalogue?q=${encodeURIComponent("full cream milk 2l")}&limit=30&page=1&perRetailer=6${heroLocation.query(location)}`);
           if (!response.ok) throw new Error("Price comparison unavailable");
-          return response.json();
-        })
-        .then((payload) => {
+          const payload = await response.json();
+          if (requestId !== heroRequestSequence) return;
           const products = payload.retailerMatches?.length ? payload.retailerMatches : payload.products || [];
           const lowestByStore = new Map();
           products.flatMap((product) => (product.stores || []).map((store) => ({ product, store }))).forEach(({ product, store }) => {
@@ -263,7 +298,9 @@
             const match = lowestByStore.get(row.dataset.heroStore);
             row.querySelector("strong").textContent = match
               ? `${heroMoney.format(match.comparablePrice)}${match.sizeDifference > 0.001 ? " / 2L" : ""}`
-              : row.dataset.heroStore === "spar" ? "Location needed" : "No current match";
+              : row.dataset.heroStore === "spar"
+                ? location ? "No nearby price" : "Location needed"
+                : "No current match";
             row.classList.toggle("unavailable", !match);
           });
           const matches = [...lowestByStore.entries()].sort((left, right) => left[1].comparablePrice - right[1].comparablePrice);
@@ -272,9 +309,9 @@
           document.querySelector(`[data-hero-store="${bestStoreId}"]`)?.classList.add("best");
           document.querySelector("#heroBestPrice").textContent = heroMoney.format(bestMatch.comparablePrice).replace(/\s/g, "");
           document.querySelector("#heroBestStore").textContent = heroStoreNames[bestStoreId];
-          document.querySelector("#heroComparisonStatus").textContent = `Best listed match highlighted across ${matches.length} retailer${matches.length === 1 ? "" : "s"}.`;
-        })
-        .catch(() => {
+          document.querySelector("#heroComparisonStatus").textContent = `Best listed match highlighted across ${matches.length} retailer${matches.length === 1 ? "" : "s"}${location ? " using nearby offers" : ""}.`;
+        } catch (_error) {
+          if (requestId !== heroRequestSequence) return;
           heroRows.forEach((row) => {
             row.querySelector("strong").textContent = "View live";
             row.classList.remove("unavailable");
@@ -282,7 +319,54 @@
           document.querySelector("#heroComparisonStatus").textContent = "Open the price checker to compare current retailer matches.";
           document.querySelector("#heroBestPrice").textContent = "5";
           document.querySelector("#heroBestStore").textContent = "grocers";
-        });
+        }
+      };
+      const useHeroLocation = async () => {
+        const status = document.querySelector("#siteLocationStatus");
+        status.textContent = "Waiting for browser permission...";
+        try {
+          const location = heroLocation.write(await heroLocation.request());
+          heroLocation.setPermission("granted");
+          status.textContent = "Location enabled. Updating nearby prices...";
+          heroLocationDialog.close();
+          await loadHeroComparison(location);
+        } catch (error) {
+          const denied = error?.code === 1;
+          heroLocation.setPermission(denied ? "denied" : "unavailable");
+          status.textContent = denied
+            ? "Permission declined. National prices will be used."
+            : "We could not determine your location. National prices will be used.";
+          heroLocationDialog.close();
+          await loadHeroComparison(null);
+        }
+      };
+      const declineHeroLocation = () => {
+        heroLocation.clear();
+        heroLocation.setPermission("declined");
+        heroLocationDialog.close();
+        void loadHeroComparison(null);
+      };
+      document.querySelector("#siteLocationAllow").addEventListener("click", useHeroLocation);
+      document.querySelector("#siteLocationDecline").addEventListener("click", declineHeroLocation);
+      heroLocationDialog.addEventListener("click", (event) => {
+        if (event.target === event.currentTarget) declineHeroLocation();
+      });
+      heroLocation.subscribe((location) => void loadHeroComparison(location));
+      const refreshHeroLocation = () => {
+        const location = heroLocation.read();
+        if (locationSignature(location) !== displayedLocationSignature) void loadHeroComparison(location);
+      };
+      window.addEventListener("pageshow", refreshHeroLocation);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") refreshHeroLocation();
+      });
+      const initialHeroLocation = heroLocation.read();
+      void loadHeroComparison(initialHeroLocation);
+      if (!initialHeroLocation) {
+        const savedPermission = heroLocation.permission();
+        if (savedPermission === "granted") void useHeroLocation();
+        else if (!savedPermission || savedPermission === "unavailable") window.setTimeout(() => heroLocationDialog.showModal(), 350);
+      }
       const menuButton = document.querySelector(".site-menu-btn");
       const mobileMenu = document.querySelector("#siteMobileMenu");
       menuButton.addEventListener("click", () => { mobileMenu.hidden = !mobileMenu.hidden; menuButton.setAttribute("aria-expanded", String(!mobileMenu.hidden)); });
