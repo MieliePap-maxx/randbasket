@@ -22,6 +22,16 @@ Updated: 18 July 2026
 
 ## P1 - Discovery and local relevance
 
+- [x] **Add local Smart Basket personalisation and consented basket-intent events**
+  - Rank “Your usuals” from add frequency and recency on each device.
+  - Keep server sharing separate, optional, pseudonymous and deletable.
+  - Retain anonymous events for no more than 365 days.
+- [ ] **Negotiate and implement retailer conversion attribution**
+  - Treat basket additions as intent, never proof of purchase.
+  - Add signed outbound attribution IDs only after retailer or affiliate contracts define permitted use.
+  - Reconcile conversions from retailer postbacks or order reports before calculating any clawback.
+  - Put commercial reporting behind authenticated operator access.
+
 - [ ] **Add product categories**
   - Present simple shopper categories derived from the shared taxonomy, not retailer-specific navigation labels.
   - Add category filtering while keeping free-text search and autocomplete.
@@ -39,6 +49,12 @@ Updated: 18 July 2026
 
 ## P2 - Trip economics and polish
 
+- [ ] **Improve Android release optimisation for the next Play bundle**
+  - Enable R8 code minification and Android resource shrinking through Expo-supported release-build configuration.
+  - Upgrade Expo/React Native and the Android Gradle Plugin only to a combination supported by the selected Expo SDK; do not force AGP 9 independently.
+  - Add keep rules only for libraries that fail release-mode testing rather than disabling optimisation globally.
+  - Compare AAB size, Play Console optimisation/obfuscation scores, startup time, and memory use before and after.
+  - Test login-free startup, location permission, catalogue search, product images, basket persistence, retailer links, and offline/error states in the minified internal build.
 - [ ] **Add fuel calculation for users**
   - Calculate round-trip distance to each selected store.
   - Let users enter vehicle consumption and fuel price, with editable defaults.

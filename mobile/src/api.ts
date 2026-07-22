@@ -18,6 +18,12 @@ export type GroceryItem = {
   quantity: number;
   category?: string;
   links?: ItemLinks;
+  comparisonQuery?: string;
+  selectedProductId?: string;
+  selectedProductName?: string;
+  selectedStoreId?: string;
+  selectedStoreName?: string;
+  selectedPrice?: number | null;
 };
 
 export type CatalogueStoreMatch = {

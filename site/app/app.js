@@ -1,7 +1,8 @@
-const APP_SHELL_VERSION = "35";
+const APP_SHELL_VERSION = "36";
 const appShellReady = Boolean(
   window.RandBasketCore
   && window.RandBasketLocation
+  && window.RandBasketSmart
   && document.getElementById("productDetailsDialog")
   && document.getElementById("specialsToggle")
   && document.getElementById("locationDialog"),
@@ -37,6 +38,7 @@ const state = {
 
 const { availableProductDetails, matchingBasketItem: findMatchingBasketItem, nextQuantity, wholeQuantity } = window.RandBasketCore;
 const locationSession = window.RandBasketLocation;
+const smartBasket = window.RandBasketSmart;
 const quantityUpdates = new Set();
 let lastProductDetailsTrigger = null;
 
@@ -65,6 +67,38 @@ const setText = (selector, value) => {
   const element = $(selector);
   if (element) element.textContent = value;
 };
+
+function recordBasketActivity(eventType, item, quantity, addedAmount = 0) {
+  if (addedAmount > 0) smartBasket.recordLocal(item, addedAmount);
+  smartBasket.track(API_ORIGIN, eventType, item, quantity);
+  renderUsuals();
+}
+
+function renderUsuals() {
+  const section = $("#usualsSection");
+  const list = $("#usualsList");
+  if (!section || !list) return;
+  const usuals = smartBasket.usuals(6);
+  section.hidden = usuals.length === 0;
+  list.innerHTML = "";
+  usuals.forEach((usual) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = usual.name;
+    button.addEventListener("click", () => {
+      $("#catalogueSearchInput").value = usual.query;
+      $("#compare").scrollIntoView({ behavior: "smooth" });
+      void searchCatalogue(1);
+    });
+    list.appendChild(button);
+  });
+}
+
+function renderSmartBasketSettings() {
+  const settings = smartBasket.settings();
+  $("#personaliseToggle").checked = settings.personalise;
+  $("#insightsToggle").checked = settings.shareInsights;
+}
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_ORIGIN}${path}`, {
@@ -378,9 +412,14 @@ async function adjustCatalogueProductQuantity(product, store, delta, preferredQu
       return;
     }
     if (!existing) return;
+    const previousQuantity = wholeQuantity(existing.quantity);
     const quantity = nextQuantity(existing.quantity, delta);
     if (quantity === 0) state.items = state.items.filter((item) => item.id !== existing.id);
     else existing.quantity = quantity;
+    const eventType = quantity === 0
+      ? "basket_remove"
+      : quantity > previousQuantity ? "basket_quantity_increase" : "basket_quantity_decrease";
+    recordBasketActivity(eventType, existing, quantity, Math.max(0, quantity - previousQuantity));
     state.latest = null;
     renderItems();
     renderResults();
@@ -671,6 +710,7 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
   const existing = state.items.find((item) => item.links?.[store.storeId] === store.url);
   if (existing) {
     existing.quantity = wholeQuantity(existing.quantity) + 1;
+    recordBasketActivity("basket_quantity_increase", existing, existing.quantity, 1);
     state.latest = null;
     renderItems();
     renderResults();
@@ -681,7 +721,7 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
     return;
   }
   const comparisonQuery = buildComparisonQuery(product, store, preferredQuery);
-  state.items.push({
+  const basketItem = {
     id: `${product.id}-${store.storeId}-${Date.now()}`,
     name: productName,
     query: comparisonQuery,
@@ -698,7 +738,9 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
     selectedPrice: store.price,
     links: { [store.storeId]: store.url || "" },
     requirement: buildBasketRequirement(product, store, comparisonQuery),
-  });
+  };
+  state.items.push(basketItem);
+  recordBasketActivity("basket_add", basketItem, 1, 1);
   state.latest = null;
   renderItems();
   renderResults();
@@ -1317,6 +1359,40 @@ function wireEvents() {
   $("#locationBtn").addEventListener("click", requestLocation);
   $("#locationAllowBtn").addEventListener("click", requestLocation);
   $("#locationDeclineBtn").addEventListener("click", declineLocation);
+  $("#personaliseToggle").addEventListener("change", (event) => {
+    smartBasket.setSettings({ personalise: event.target.checked });
+    renderUsuals();
+    $("#smartBasketStatus").textContent = event.target.checked
+      ? "Smart shortcuts are learning on this device."
+      : "Personalised shortcuts are paused.";
+  });
+  $("#insightsToggle").addEventListener("change", async (event) => {
+    const enabled = event.target.checked;
+    event.target.disabled = true;
+    $("#smartBasketStatus").textContent = enabled ? "Enabling anonymous basket activity..." : "Deleting anonymous basket activity...";
+    try {
+      await smartBasket.setSharing(API_ORIGIN, enabled);
+      $("#smartBasketStatus").textContent = enabled
+        ? "Anonymous basket activity is enabled. You can switch it off at any time."
+        : "Anonymous basket activity has been switched off and deleted.";
+    } catch (error) {
+      if (enabled) {
+        event.target.checked = false;
+        smartBasket.setSettings({ shareInsights: false });
+        $("#smartBasketStatus").textContent = error.message;
+      } else {
+        event.target.checked = false;
+        $("#smartBasketStatus").textContent = "Sharing is off. Server deletion is pending and will retry when you are online.";
+      }
+    } finally {
+      event.target.disabled = false;
+    }
+  });
+  $("#clearSmartBasketBtn").addEventListener("click", () => {
+    smartBasket.clearProfile();
+    renderUsuals();
+    $("#smartBasketStatus").textContent = "Your on-device Smart Basket history has been cleared.";
+  });
   $("#catalogueSearchBtn").addEventListener("click", () => searchCatalogue(1));
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchCatalogue(1);
@@ -1344,10 +1420,30 @@ function wireEvents() {
   $("#itemsBody").addEventListener("input", (event) => {
     if (event.target.matches('[data-field="quantity"]')) scheduleBasketScan(650);
   });
+  $("#itemsBody").addEventListener("change", (event) => {
+    if (!event.target.matches('[data-field="quantity"]')) return;
+    const item = state.items.find((entry) => entry.id === event.target.closest("tr")?.dataset.id);
+    if (!item) return;
+    const previousQuantity = wholeQuantity(item.quantity);
+    const quantity = wholeQuantity(event.target.value);
+    event.target.value = quantity;
+    item.quantity = quantity;
+    if (quantity !== previousQuantity) {
+      recordBasketActivity(
+        quantity > previousQuantity ? "basket_quantity_increase" : "basket_quantity_decrease",
+        item,
+        quantity,
+        Math.max(0, quantity - previousQuantity),
+      );
+      void saveAll();
+    }
+  });
   $("#itemsBody").addEventListener("click", (event) => {
     const removeId = event.target.dataset.remove;
     if (!removeId) return;
     readItemsFromDom();
+    const removed = state.items.find((item) => item.id === removeId);
+    if (removed) recordBasketActivity("basket_remove", removed, 0);
     state.items = state.items.filter((item) => item.id !== removeId);
     renderItems();
     updateSummary();
@@ -1375,6 +1471,9 @@ async function init() {
   importSharedBasket();
   renderStores();
   renderLocation();
+  renderSmartBasketSettings();
+  renderUsuals();
+  void smartBasket.retryDeletion(API_ORIGIN).catch(() => {});
   renderItems();
   renderResults();
   updateSummary();
@@ -1416,7 +1515,7 @@ locationSession.subscribe((location) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=35", { updateViaCache: "none" })
+      .register("./service-worker.js?v=36", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });

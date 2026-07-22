@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500" role="img" aria-label="RandBasket feature graphic">
+  <defs>
+    <linearGradient id="brand" x1="28" y1="22" x2="988" y2="484" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fbfcf8"/>
+      <stop offset="1" stop-color="#e7f2eb"/>
+    </linearGradient>
+    <linearGradient id="logoGreen" x1="23" y1="18" x2="119" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1f7a53"/>
+      <stop offset="1" stop-color="#0d3f30"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#173d30" flood-opacity=".18"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="500" fill="url(#brand)"/>
+  <circle cx="957" cy="53" r="118" fill="#d0e6d8" opacity=".8"/>
+  <path d="M0 428C164 386 302 420 430 500H0Z" fill="#f4dcd2" opacity=".82"/>
+
+  <g transform="translate(58 51)">
+    <rect width="74" height="74" rx="17" fill="url(#logoGreen)"/>
+    <path d="M16 34h42l-5 27H21l-5-27Z" fill="#f8f7f1"/>
+    <path d="M25 34c1-11 5-17 12-17s11 6 12 17" fill="none" stroke="#f8f7f1" stroke-width="5" stroke-linecap="round"/>
+    <path d="M29 28h9c8 0 12 4 12 10 0 4-2 7-6 8l8 11h-9l-7-9v9h-7V28Zm7 6v8h2c3 0 5-2 5-4 0-3-2-4-5-4h-2Z" fill="#ed6640"/>
+    <text x="94" y="30" fill="#123b2f" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="800">RandBasket</text>
+    <text x="94" y="53" fill="#447064" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">GROCERY PRICE COMPARISON</text>
+  </g>
+
+  <text x="58" y="203" fill="#102f26" font-family="Georgia, 'Times New Roman', serif" font-size="58" font-weight="700">
+    <tspan x="58" dy="0">Compare Grocery</tspan>
+    <tspan x="58" dy="63">Prices</tspan>
+  </text>
+  <rect x="58" y="292" width="74" height="6" rx="3" fill="#ed6640"/>
+  <text x="58" y="340" fill="#244a3f" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600">
+    <tspan x="58">Build your basket.</tspan>
+    <tspan x="58" dy="31">Find the cheapest store.</tspan>
+  </text>
+  <g transform="translate(58 423)">
+    <circle cx="7" cy="7" r="7" fill="#b6ff68"/>
+    <text x="24" y="12" fill="#37675a" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700">Compare listed prices across your favourite grocers</text>
+  </g>
+
+  <g transform="translate(650 24)" filter="url(#shadow)">
+    <rect width="310" height="452" rx="38" fill="#102f26"/>
+    <rect x="12" y="12" width="286" height="428" rx="29" fill="#fcfdf9"/>
+    <rect x="111" y="20" width="88" height="8" rx="4" fill="#b8c8c0"/>
+    <g transform="translate(31 47)">
+      <rect width="248" height="44" rx="13" fill="#eaf3ed"/>
+      <circle cx="21" cy="22" r="8" fill="none" stroke="#1f7a53" stroke-width="2"/>
+      <path d="m27 28 6 6" stroke="#1f7a53" stroke-width="2" stroke-linecap="round"/>
+      <text x="43" y="27" fill="#153b30" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700">Full cream milk 2L</text>
+    </g>
+    <text x="31" y="119" fill="#4d6a61" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="800" letter-spacing="1.2">BEST PRICE MATCHES</text>
+
+    <g transform="translate(31 135)">
+      <rect width="248" height="67" rx="13" fill="#dcf5e5" stroke="#2b9b65" stroke-width="2"/>
+      <rect x="12" y="12" width="42" height="42" rx="10" fill="#ffffff"/>
+      <path d="M28 20h11l3 25H25l3-25Z" fill="#f2f2e8" stroke="#8ba99b"/>
+      <text x="66" y="26" fill="#153b30" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800">Store A</text>
+      <text x="66" y="46" fill="#587269" font-family="Arial, Helvetica, sans-serif" font-size="11">Fresh milk · 2 L</text>
+      <text x="191" y="29" fill="#0f6649" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900">R32,99</text>
+      <rect x="185" y="41" width="49" height="16" rx="8" fill="#0f6649"/>
+      <text x="195" y="53" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="8" font-weight="800">BEST</text>
+    </g>
+
+    <g transform="translate(31 211)">
+      <rect width="248" height="62" rx="13" fill="#ffffff" stroke="#d7e1db"/>
+      <rect x="12" y="10" width="42" height="42" rx="10" fill="#f0f4f1"/>
+      <path d="M28 18h11l3 25H25l3-25Z" fill="#fff" stroke="#8ba99b"/>
+      <text x="66" y="26" fill="#153b30" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800">Store B</text>
+      <text x="66" y="45" fill="#587269" font-family="Arial, Helvetica, sans-serif" font-size="11">Full cream · 2 L</text>
+      <text x="191" y="34" fill="#153b30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="900">R34,99</text>
+    </g>
+
+    <g transform="translate(31 282)">
+      <rect width="248" height="62" rx="13" fill="#ffffff" stroke="#d7e1db"/>
+      <rect x="12" y="10" width="42" height="42" rx="10" fill="#f0f4f1"/>
+      <path d="M28 18h11l3 25H25l3-25Z" fill="#fff" stroke="#8ba99b"/>
+      <text x="66" y="26" fill="#153b30" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800">Store C</text>
+      <text x="66" y="45" fill="#587269" font-family="Arial, Helvetica, sans-serif" font-size="11">Fresh milk · 2 L</text>
+      <text x="191" y="34" fill="#153b30" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="900">R38,99</text>
+    </g>
+
+    <g transform="translate(31 362)">
+      <rect width="248" height="51" rx="13" fill="#ed6640"/>
+      <text x="18" y="22" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700">BEST BASKET TOTAL</text>
+      <text x="18" y="39" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="900">R 428,47</text>
+      <path d="m218 19 10 7-10 7" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

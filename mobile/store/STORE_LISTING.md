@@ -65,6 +65,6 @@ Prices, promotions, stock and availability can vary by location, branch, account
 
 PRIVACY
 
-Your basket is stored on your device. Location is optional, used only while the app is open, and is not used for background tracking or location history.
+Your basket and Smart Basket shortcuts are stored on your device. Location is optional, used only while the app is open, and is not used for background tracking or location history. Optional anonymous basket activity is off by default and can be deleted by switching it off.
 
 RandBasket is an independent comparison service and is not affiliated with or endorsed by the retailers shown unless explicitly stated.

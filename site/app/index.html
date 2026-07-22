@@ -74,7 +74,7 @@
         <div class="hero-proof" aria-label="RandBasket benefits">
           <div><strong>5</strong><span>major retailers</span></div>
           <div><strong>R/kg</strong><span>fair unit pricing</span></div>
-          <div><strong>Private</strong><span>basket stays here</span></div>
+          <div><strong>Private</strong><span>local by default</span></div>
         </div>
       </section>
 
@@ -91,7 +91,7 @@
 
       <section id="emptyBasket" class="empty-basket empty-basket-onboarding" aria-label="Quick access product searches">
         <div class="empty-basket-mark"><span>R</span></div>
-        <div><p class="eyebrow">Ease of access</p><h3>Quickly compare a weekly staple.</h3><p>Choose a shortcut at any time to search, compare pack sizes and add the match you want.</p><div class="starter-searches"><button type="button" data-starter="full cream milk 2l">Milk</button><button type="button" data-starter="white bread 700g">Bread</button><button type="button" data-starter="eggs 18 pack">Eggs</button><button type="button" data-starter="beef mince 1kg">Mince</button><button type="button" data-starter="chicken portions 1kg">Chicken</button><button type="button" data-starter="cake flour 2.5kg">Flour</button></div></div>
+        <div><p class="eyebrow">Ease of access</p><h3>Quickly compare a weekly staple.</h3><p>Choose a shortcut at any time to search, compare pack sizes and add the match you want.</p><div class="starter-searches"><button type="button" data-starter="full cream milk 2l">Milk</button><button type="button" data-starter="white bread 700g">Bread</button><button type="button" data-starter="eggs 18 pack">Eggs</button><button type="button" data-starter="beef mince 1kg">Mince</button><button type="button" data-starter="chicken portions 1kg">Chicken</button><button type="button" data-starter="cake flour 2.5kg">Flour</button></div><div id="usualsSection" class="usuals-section" hidden><strong>Your usuals</strong><div id="usualsList" class="starter-searches"></div></div></div>
       </section>
 
       <section class="catalogue-pane" id="compare" aria-label="Product price comparison">
@@ -160,6 +160,14 @@
             <legend>Stores to check</legend>
             <div id="storeToggles" class="store-toggles"></div>
           </fieldset>
+          <section class="smart-settings" aria-labelledby="smartBasketTitle">
+            <h3 id="smartBasketTitle">Smart Basket</h3>
+            <label class="toggle smart-toggle"><input id="personaliseToggle" type="checkbox" /><span><strong>Personalise shortcuts on this device</strong><small>Learns which groceries you add most often. This profile stays on this device.</small></span></label>
+            <label class="toggle smart-toggle"><input id="insightsToggle" type="checkbox" /><span><strong>Share anonymous basket activity</strong><small>Optional. Shares product, retailer, quantity and listed price to improve RandBasket and support future retailer attribution. No name, email or location.</small></span></label>
+            <p class="smart-retention">Anonymous activity is kept for up to 365 days. Adding an item is a shopping-intent signal, not proof of purchase.</p>
+            <button class="ghost compact" id="clearSmartBasketBtn" type="button">Clear Smart Basket data</button>
+            <p id="smartBasketStatus" class="source-note" aria-live="polite"></p>
+          </section>
           <div class="source-note" id="sourceNote"></div>
         </aside>
 
@@ -288,6 +296,7 @@
 
     <script src="../location-session.js?v=1"></script>
     <script src="comparison-core.js?v=4"></script>
-    <script src="app.js?v=35"></script>
+    <script src="smart-basket.js?v=1"></script>
+    <script src="app.js?v=36"></script>
   </body>
 </html>

@@ -3,6 +3,9 @@ name = "randbasket-api"
 main = "src/index.ts"
 compatibility_date = "2026-07-15"
 
+[triggers]
+crons = ["17 2 * * *"]
+
 [vars]
 APP_ORIGIN = "https://www.randbasket.co.za"
 FEEDBACK_FROM = "feedback@randbasket.co.za"

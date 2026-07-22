@@ -15,6 +15,7 @@ export interface Env {
   FEEDBACK_TO: string;
   TURNSTILE_SECRET_KEY: string;
   VECTOR_INDEX_TOKEN?: string;
+  BASKET_INSIGHTS_SECRET?: string;
 }
 
 type TurnstileVerification = {
@@ -723,6 +724,128 @@ function resolvedCategoryFamily(category: string | undefined | null, text = "") 
   const family = categoryFamily(category);
   if (family && !["groceries", "grocery", "food", "all products", "uncategorized", "other"].includes(family)) return family;
   return inferredCategoryFamily(text) || family;
+}
+
+const basketEventTypes = new Set([
+  "basket_add",
+  "basket_quantity_increase",
+  "basket_quantity_decrease",
+  "basket_remove",
+  "retailer_link_opened",
+]);
+const basketConsentVersion = "basket-insights-v1";
+const basketRetentionDays = 365;
+
+function limitedText(value: unknown, maxLength: number) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function validClientId(value: unknown) {
+  return /^[a-zA-Z0-9_-]{20,128}$/.test(String(value || ""));
+}
+
+async function basketSubjectHash(secret: string, clientId: string) {
+  const bytes = new TextEncoder().encode(`${secret}:${clientId}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+type BasketEventInput = {
+  id?: unknown;
+  eventType?: unknown;
+  productId?: unknown;
+  productName?: unknown;
+  category?: unknown;
+  retailerId?: unknown;
+  retailerName?: unknown;
+  basketItemId?: unknown;
+  quantity?: unknown;
+  priceCents?: unknown;
+  occurredAt?: unknown;
+};
+
+function normalizeBasketEvent(input: BasketEventInput, now: Date) {
+  const id = limitedText(input.id, 128);
+  const eventType = limitedText(input.eventType, 40);
+  const productName = limitedText(input.productName, 240);
+  const quantity = Math.floor(Number(input.quantity));
+  const parsedDate = new Date(String(input.occurredAt || ""));
+  const occurredAt = Number.isFinite(parsedDate.getTime())
+    && Math.abs(now.getTime() - parsedDate.getTime()) <= 7 * 24 * 60 * 60 * 1000
+    ? parsedDate.toISOString()
+    : now.toISOString();
+  const rawPrice = input.priceCents == null ? null : Math.round(Number(input.priceCents));
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(id) || !basketEventTypes.has(eventType) || !productName) return null;
+  if (!Number.isInteger(quantity) || quantity < 0 || quantity > 999) return null;
+  if (rawPrice != null && (!Number.isInteger(rawPrice) || rawPrice < 0 || rawPrice > 100_000_000)) return null;
+  return {
+    id,
+    eventType,
+    productId: limitedText(input.productId, 160) || null,
+    productName,
+    category: limitedText(input.category, 120) || null,
+    retailerId: limitedText(input.retailerId, 80) || null,
+    retailerName: limitedText(input.retailerName, 120) || null,
+    basketItemId: limitedText(input.basketItemId, 160) || null,
+    quantity,
+    priceCents: rawPrice,
+    occurredAt,
+  };
+}
+
+async function recordBasketEvents(request: Request, env: Env) {
+  if (!env.BASKET_INSIGHTS_SECRET) {
+    return json(request, env, { ok: false, error: "Anonymous basket insights are not configured" }, 503);
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json() as Record<string, unknown>;
+  } catch {
+    return json(request, env, { ok: false, error: "Invalid JSON body" }, 400);
+  }
+  if (!validClientId(body.clientId) || body.consentVersion !== basketConsentVersion) {
+    return json(request, env, { ok: false, error: "Valid consent and installation ID are required" }, 400);
+  }
+  const source = body.source === "mobile" ? "mobile" : body.source === "web" ? "web" : "";
+  const inputEvents = Array.isArray(body.events) ? body.events.slice(0, 50) : [];
+  if (!source || inputEvents.length === 0) {
+    return json(request, env, { ok: false, error: "Source and at least one event are required" }, 400);
+  }
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + basketRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const subjectHash = await basketSubjectHash(env.BASKET_INSIGHTS_SECRET, String(body.clientId));
+  const events = inputEvents.map((event) => normalizeBasketEvent((event || {}) as BasketEventInput, now)).filter(Boolean);
+  if (events.length === 0) return json(request, env, { ok: false, error: "No valid events supplied" }, 400);
+
+  await env.DB.batch(events.map((event) => env.DB.prepare(`
+    INSERT OR IGNORE INTO basket_events (
+      id, subject_hash, event_type, source, consent_version, product_id,
+      product_name, category, retailer_id, retailer_name, basket_item_id,
+      quantity, price_cents, occurred_at, received_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    event!.id, subjectHash, event!.eventType, source, basketConsentVersion,
+    event!.productId, event!.productName, event!.category, event!.retailerId,
+    event!.retailerName, event!.basketItemId, event!.quantity, event!.priceCents,
+    event!.occurredAt, now.toISOString(), expiresAt,
+  )));
+  return json(request, env, { ok: true, accepted: events.length, retentionDays: basketRetentionDays }, 202);
+}
+
+async function deleteBasketEvents(request: Request, env: Env) {
+  if (!env.BASKET_INSIGHTS_SECRET) {
+    return json(request, env, { ok: false, error: "Anonymous basket insights are not configured" }, 503);
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json() as Record<string, unknown>;
+  } catch {
+    return json(request, env, { ok: false, error: "Invalid JSON body" }, 400);
+  }
+  if (!validClientId(body.clientId)) return json(request, env, { ok: false, error: "Valid installation ID is required" }, 400);
+  const subjectHash = await basketSubjectHash(env.BASKET_INSIGHTS_SECRET, String(body.clientId));
+  await env.DB.prepare("DELETE FROM basket_events WHERE subject_hash = ?").bind(subjectHash).run();
+  return json(request, env, { ok: true, deleted: true });
 }
 
 function categorySearchPatterns(family: string | undefined) {
@@ -2577,6 +2700,20 @@ export default {
 
     if (
       request.method === "POST" &&
+      ["/v1/events/basket", "/api/events/basket"].includes(url.pathname)
+    ) {
+      return recordBasketEvents(request, env);
+    }
+
+    if (
+      request.method === "POST" &&
+      ["/v1/privacy/delete", "/api/privacy/delete"].includes(url.pathname)
+    ) {
+      return deleteBasketEvents(request, env);
+    }
+
+    if (
+      request.method === "POST" &&
       ["/v1/scan/catalogue", "/api/scan/catalogue"].includes(url.pathname)
     ) {
       return scanBasket(request, env);
@@ -2586,5 +2723,10 @@ export default {
       ok: false,
       error: "Not found",
     }, 404);
+  },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await env.DB.prepare("DELETE FROM basket_events WHERE expires_at <= ?")
+      .bind(new Date().toISOString())
+      .run();
   },
 };

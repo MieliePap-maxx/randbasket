@@ -34,6 +34,19 @@ import {
   Store,
 } from "./src/api";
 import { money, niceDate } from "./src/format";
+import {
+  clearLocalTrends,
+  flushBasketEvents,
+  loadSmartSettings,
+  loadUsuals,
+  recordLocalTrend,
+  retryPendingBasketDeletion,
+  saveSmartSettings,
+  setBasketSharing,
+  SmartSettings,
+  SmartUsual,
+  trackBasketEvent,
+} from "./src/smartBasket";
 
 const storageKey = "randbasket-device-state-v1";
 const legalLinks = {
@@ -115,6 +128,9 @@ export default function App() {
   const [status, setStatus] = useState("Loading your saved basket...");
   const [specials, setSpecials] = useState<SpecialOffer[]>([]);
   const [specialsLoading, setSpecialsLoading] = useState(false);
+  const [smartSettings, setSmartSettings] = useState<SmartSettings>({ personalise: true, shareInsights: false });
+  const [usuals, setUsuals] = useState<SmartUsual[]>([]);
+  const [smartStatus, setSmartStatus] = useState("Your shopping patterns stay on this phone.");
 
   const bestBasket = useMemo(() => {
     if (!latest?.bestBasketStoreId) return null;
@@ -133,6 +149,17 @@ export default function App() {
     } catch {
       Alert.alert("Link unavailable", "Please visit randbasket.co.za for RandBasket support and policies.");
     }
+  }
+
+  async function recordMobileActivity(
+    eventType: "basket_add" | "basket_quantity_increase" | "basket_quantity_decrease" | "basket_remove",
+    item: GroceryItem,
+    quantity: number,
+    addedAmount = 0,
+  ) {
+    if (addedAmount > 0) await recordLocalTrend(item, addedAmount);
+    setUsuals(await loadUsuals());
+    await trackBasketEvent(apiUrl, eventType, item, quantity);
   }
 
   useEffect(() => {
@@ -169,6 +196,11 @@ export default function App() {
           setSettings(savedSettings);
           setLatest(payload.latest || null);
         }
+        const loadedSmartSettings = await loadSmartSettings();
+        setSmartSettings(loadedSmartSettings);
+        setUsuals(await loadUsuals());
+        if (loadedSmartSettings.shareInsights) void flushBasketEvents(apiUrl).catch(() => {});
+        else void retryPendingBasketDeletion(apiUrl);
         if (!savedSettings.locationPermission) {
           setTimeout(() => {
             Alert.alert(
@@ -352,18 +384,24 @@ export default function App() {
     product.stores.forEach((store) => {
       if (store.url) links[store.storeId] = store.url;
     });
-    setItems((current) => [
-      ...current,
-      {
+    const selectedStore = product.stores.find((store) => store.price != null) || product.stores[0];
+    const item: GroceryItem = {
         id: `${product.id}-${Date.now()}`,
         name: product.canonicalName,
         query: product.canonicalName,
+        comparisonQuery: product.canonicalName,
         targetSize: product.targetSize || "",
         quantity: 1,
         category: product.category || "",
         links,
-      },
-    ]);
+        selectedProductId: product.id,
+        selectedProductName: selectedStore?.productName || product.canonicalName,
+        selectedStoreId: selectedStore?.storeId || "",
+        selectedStoreName: selectedStore?.storeName || "",
+        selectedPrice: selectedStore?.price ?? null,
+      };
+    setItems((current) => [...current, item]);
+    void recordMobileActivity("basket_add", item, 1, 1);
     if (!keepResults) {
       setCatalogueSearch("");
       setCatalogueResults([]);
@@ -382,18 +420,25 @@ export default function App() {
       });
     });
     const name = catalogueSearch.trim();
-    setItems((current) => [
-      ...current,
-      {
+    const selectedProduct = matches[0];
+    const selectedStore = selectedProduct?.stores[0];
+    const item: GroceryItem = {
         id: `catalogue-${Date.now()}`,
         name,
         query: name,
+        comparisonQuery: name,
         targetSize: "",
         quantity: 1,
         category: "",
         links,
-      },
-    ]);
+        selectedProductId: selectedProduct?.id || "",
+        selectedProductName: selectedStore?.productName || name,
+        selectedStoreId: selectedStore?.storeId || "",
+        selectedStoreName: selectedStore?.storeName || "",
+        selectedPrice: selectedStore?.price ?? null,
+      };
+    setItems((current) => [...current, item]);
+    void recordMobileActivity("basket_add", item, 1, 1);
     setCatalogueSearch("");
     setCatalogueResults([]);
     setCatalogueRetailerMatches([]);
@@ -403,7 +448,49 @@ export default function App() {
   }
 
   function updateItem(id: string, patch: Partial<GroceryItem>) {
-    setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+    const existing = items.find((item) => item.id === id);
+    const normalizedPatch = patch.quantity == null ? patch : { ...patch, quantity: Math.max(1, Math.floor(Number(patch.quantity) || 1)) };
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, ...normalizedPatch } : item)));
+    if (existing && normalizedPatch.quantity != null && normalizedPatch.quantity !== existing.quantity) {
+      const nextItem = { ...existing, ...normalizedPatch };
+      void recordMobileActivity(
+        normalizedPatch.quantity > existing.quantity ? "basket_quantity_increase" : "basket_quantity_decrease",
+        nextItem,
+        normalizedPatch.quantity,
+        Math.max(0, normalizedPatch.quantity - existing.quantity),
+      );
+    }
+  }
+
+  function removeItem(id: string) {
+    const item = items.find((entry) => entry.id === id);
+    if (item) void recordMobileActivity("basket_remove", item, 0);
+    setItems((current) => current.filter((entry) => entry.id !== id));
+  }
+
+  async function togglePersonalisation(value: boolean) {
+    const next = { ...smartSettings, personalise: value };
+    setSmartSettings(next);
+    await saveSmartSettings(next);
+    setUsuals(value ? await loadUsuals() : []);
+    setSmartStatus(value ? "Smart shortcuts are learning on this phone." : "Personalised shortcuts are paused.");
+  }
+
+  async function toggleBasketSharing(value: boolean) {
+    setSmartSettings((current) => ({ ...current, shareInsights: value }));
+    setSmartStatus(value ? "Enabling anonymous basket activity..." : "Deleting anonymous basket activity...");
+    try {
+      await setBasketSharing(apiUrl, value);
+      setSmartStatus(value
+        ? "Anonymous basket activity is enabled. You can switch it off at any time."
+        : "Anonymous basket activity has been switched off and deleted.");
+    } catch {
+      setSmartSettings((current) => ({ ...current, shareInsights: false }));
+      await saveSmartSettings({ ...smartSettings, shareInsights: false });
+      setSmartStatus(value
+        ? "Anonymous basket activity could not be enabled."
+        : "Sharing is off. Server deletion is pending and will retry when you are online.");
+    }
   }
 
   function toggleStore(storeId: string, value: boolean) {
@@ -420,7 +507,7 @@ export default function App() {
           <View style={styles.hero}>
             <Text style={styles.kicker}>South African grocery value</Text>
             <Text style={styles.title}>Grocery Price Checker</Text>
-            <Text style={styles.subtitle}>Compare your real basket across Pick n Pay, Checkers, and Woolworths.</Text>
+            <Text style={styles.subtitle}>Compare your real basket across Pick n Pay, Checkers, Woolworths, SPAR, and Makro.</Text>
           </View>
 
           <View style={styles.panel}>
@@ -476,6 +563,27 @@ export default function App() {
               </View>
 
               <View style={styles.panel}>
+                <Text style={styles.sectionTitle}>Smart Basket</Text>
+                <View style={styles.smartRow}>
+                  <View style={styles.flex}>
+                    <Text style={styles.storeName}>Personalise shortcuts on this phone</Text>
+                    <Text style={styles.smartCopy}>Learns which groceries you add most often. This profile never leaves this phone.</Text>
+                  </View>
+                  <Switch value={smartSettings.personalise} onValueChange={(value) => void togglePersonalisation(value)} />
+                </View>
+                <View style={styles.smartRow}>
+                  <View style={styles.flex}>
+                    <Text style={styles.storeName}>Share anonymous basket activity</Text>
+                    <Text style={styles.smartCopy}>Optional. Shares product, retailer, quantity and listed price. No name, email or location.</Text>
+                  </View>
+                  <Switch value={smartSettings.shareInsights} onValueChange={(value) => void toggleBasketSharing(value)} />
+                </View>
+                <Text style={styles.smartCopy}>Anonymous activity is kept for up to 365 days. An add is shopping intent, not proof of purchase.</Text>
+                <Text style={styles.saveStatus}>{smartStatus}</Text>
+                <Button label="Clear Smart Basket data" variant="quiet" onPress={() => void clearLocalTrends().then(async () => { setUsuals([]); setSmartStatus("On-device Smart Basket history cleared."); })} />
+              </View>
+
+              <View style={styles.panel}>
                 <View style={styles.sectionHead}>
                   <Text style={styles.sectionTitle}>Stores</Text>
                   <Button
@@ -528,6 +636,18 @@ export default function App() {
                   style={styles.input}
                   value={catalogueSearch}
                 />
+                {usuals.length ? (
+                  <View style={styles.usualsWrap}>
+                    <Text style={styles.label}>Your usuals</Text>
+                    <View style={styles.usualsRow}>
+                      {usuals.map((usual) => (
+                        <Pressable key={usual.query} onPress={() => setCatalogueSearch(usual.query)} style={styles.usualChip}>
+                          <Text style={styles.usualChipText}>{usual.name}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
                 {catalogueRetailerMatches.length > 0 ? (
                   <RetailerMatchComparison
                     matches={catalogueRetailerMatches}
@@ -563,7 +683,7 @@ export default function App() {
                       item={item}
                       key={item.id}
                       onChange={updateItem}
-                      onRemove={(id) => setItems((current) => current.filter((entry) => entry.id !== id))}
+                      onRemove={removeItem}
                     />
                   ))
                 )}
@@ -891,8 +1011,8 @@ function ItemCard({
           value={item.targetSize || ""}
         />
         <TextInput
-          keyboardType="decimal-pad"
-          onChangeText={(value) => onChange(item.id, { quantity: Number(value || 1) })}
+          keyboardType="number-pad"
+          onChangeText={(value) => onChange(item.id, { quantity: Math.max(1, Math.floor(Number(value.replace(/\D/g, "")) || 1)) })}
           placeholder="Qty"
           style={[styles.input, styles.qtyInput]}
           value={String(item.quantity || 1)}
@@ -1124,6 +1244,41 @@ const styles = StyleSheet.create({
   storeName: {
     color: "#1e2c25",
     fontSize: 15,
+    fontWeight: "800",
+  },
+  smartRow: {
+    alignItems: "flex-start",
+    backgroundColor: "#f7f6f1",
+    borderRadius: 7,
+    flexDirection: "row",
+    gap: 12,
+    padding: 10,
+  },
+  smartCopy: {
+    color: "#697168",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  usualsWrap: {
+    gap: 7,
+  },
+  usualsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+  },
+  usualChip: {
+    backgroundColor: "#edf5ef",
+    borderColor: "#c8ddd0",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  usualChipText: {
+    color: "#17694c",
+    fontSize: 12,
     fontWeight: "800",
   },
   empty: {

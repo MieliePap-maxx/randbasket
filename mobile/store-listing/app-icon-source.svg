@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="RandBasket app icon">
+  <defs>
+    <linearGradient id="green" x1="64" y1="48" x2="456" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1f7a53"/>
+      <stop offset="1" stop-color="#0d3f30"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#green)"/>
+  <path d="M104 211h304l-33 200H137l-33-200Z" fill="#f8f7f1"/>
+  <path d="M170 211c4-76 38-117 86-117s82 41 86 117" fill="none" stroke="#f8f7f1" stroke-width="36" stroke-linecap="round"/>
+  <path d="M196 164h66c55 0 85 26 85 68 0 29-17 50-46 61l57 80h-67l-47-70h-1v70h-47V164Zm47 42v55h19c22 0 34-10 34-28s-12-27-34-27h-19Z" fill="#ed6640"/>
+  <path d="M163 414h186" stroke="#0d3f30" stroke-width="18" stroke-linecap="round" opacity=".18"/>
+</svg>
