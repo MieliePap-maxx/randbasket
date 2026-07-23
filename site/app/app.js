@@ -1,4 +1,4 @@
-const APP_SHELL_VERSION = "36";
+const APP_SHELL_VERSION = "37";
 const appShellReady = Boolean(
   window.RandBasketCore
   && window.RandBasketLocation
@@ -27,6 +27,7 @@ const state = {
   catalogueRetailerMatches: [],
   catalogueRetailerDiagnostics: {},
   cataloguePage: 1,
+  catalogueTotalPages: 1,
   catalogueHasMore: false,
   specials: [],
   specialsLoaded: false,
@@ -291,9 +292,10 @@ function parseMeasurement(...values) {
 }
 
 function getUnitComparison(product, store) {
+  if (store.price == null) return null;
   const measurement = parseMeasurement(store.size, store.productName, product.canonicalName);
   const price = Number(store.price);
-  if (!measurement || !Number.isFinite(price)) return null;
+  if (!measurement || !Number.isFinite(price) || price <= 0) return null;
   return {
     ...measurement,
     unitPrice: (price * measurement.comparisonAmount) / measurement.baseAmount,
@@ -577,7 +579,7 @@ function renderCatalogueResults() {
   pagination.hidden = state.catalogueResults.length === 0;
   $("#cataloguePreviousBtn").disabled = state.cataloguePage <= 1;
   $("#catalogueMoreBtn").disabled = !state.catalogueHasMore;
-  $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage}`;
+  $("#cataloguePageLabel").textContent = `Page ${state.cataloguePage} of ${state.catalogueTotalPages}`;
   if (!state.catalogueResults.length && !state.catalogueQuery) return;
 
   const retailerMatches = state.catalogueRetailerMatches.length
@@ -679,6 +681,9 @@ function renderCatalogueResults() {
       const price = store.price == null
         ? `<strong class="catalogue-price-unavailable">Price unavailable</strong>`
         : `${was}<strong>${formatMoney(store.price)}</strong>${unitPrice}${effectivePrice}`;
+      const basketControl = store.price == null
+        ? `<button type="button" class="catalogue-add-btn catalogue-item-control" disabled>Price pending</button>`
+        : quantityControlMarkup(existing, productName, true);
       article.innerHTML = `
         ${productImageMarkup(store.imageUrl, productName, "catalogue-image", true)}
         <div class="catalogue-product-copy">
@@ -690,7 +695,7 @@ function renderCatalogueResults() {
           ${alternative}
           ${link}
         </div>
-        <div class="catalogue-price">${price}${quantityControlMarkup(existing, productName, true)}</div>
+        <div class="catalogue-price">${price}${basketControl}</div>
       `;
       const imageButton = article.querySelector(".product-image-button");
       const detailsTriggers = [imageButton, article.querySelector(".product-details-name")].filter(Boolean);
@@ -749,9 +754,10 @@ async function addCatalogueProductToBasket(product, store, preferredQuery = "") 
   renderCatalogueResults();
   if (state.specialsLoaded) renderSpecials();
   scheduleBasketScan(150);
+  $("#compare").scrollIntoView({ behavior: "auto", block: "start" });
 }
 
-async function searchCatalogue(page = 1) {
+async function searchCatalogue(page = 1, scrollToTop = false) {
   const query = $("#catalogueSearchInput").value.trim();
   if (!query) {
     $("#catalogueStatus").textContent = "Type a product to compare.";
@@ -759,6 +765,7 @@ async function searchCatalogue(page = 1) {
   }
   const button = $("#catalogueSearchBtn");
   state.catalogueQuery = query;
+  if (scrollToTop) $("#compare").scrollIntoView({ behavior: "auto", block: "start" });
   button.disabled = true;
   $("#catalogueLoading").hidden = false;
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
@@ -771,10 +778,15 @@ async function searchCatalogue(page = 1) {
     state.catalogueRetailerDiagnostics = payload.retailerDiagnostics || {};
     state.cataloguePage = payload.page || Math.max(1, page);
     state.catalogueHasMore = Boolean(payload.hasMore || Object.values(payload.retailerHasMore || {}).some(Boolean));
+    state.catalogueTotalPages = Math.max(
+      state.cataloguePage,
+      Number(payload.totalPages) || (state.catalogueHasMore ? state.cataloguePage + 1 : state.cataloguePage),
+    );
     $("#catalogueStatus").textContent = state.catalogueResults.length
       ? `Comparable unit prices for ${query}`
       : "No priced catalogue matches yet.";
     renderCatalogueResults();
+    if (scrollToTop) $("#compare").scrollIntoView({ behavior: "auto", block: "start" });
   } catch (error) {
     $("#catalogueStatus").innerHTML = `We could not load product matches. <button class="inline-retry" type="button">Try again</button>`;
     $("#catalogueStatus .inline-retry")?.addEventListener("click", searchCatalogue);
@@ -1397,8 +1409,8 @@ function wireEvents() {
   $("#catalogueSearchInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchCatalogue(1);
   });
-  $("#cataloguePreviousBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage - 1));
-  $("#catalogueMoreBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage + 1));
+  $("#cataloguePreviousBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage - 1, true));
+  $("#catalogueMoreBtn").addEventListener("click", () => searchCatalogue(state.cataloguePage + 1, true));
   $("#specialsToggle").addEventListener("click", () => {
     setSpecialsOpen($("#specialsToggle").getAttribute("aria-expanded") !== "true");
   });
@@ -1515,7 +1527,7 @@ locationSession.subscribe((location) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=36", { updateViaCache: "none" })
+      .register("./service-worker.js?v=37", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });

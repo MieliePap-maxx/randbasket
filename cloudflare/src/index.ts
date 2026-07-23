@@ -1762,12 +1762,19 @@ async function findCatalogue(
   query = stripRetailerAliases(query);
   const intent = parseQueryIntent(query);
   const queryTokens = tokens(intent.normalizedQuery);
-  if (!queryTokens.length) return { products: [], retailerMatches: [], hasMore: false };
+  if (!queryTokens.length) {
+    return {
+      products: [],
+      retailerMatches: [],
+      retailerMatchCounts: {},
+      totalMatches: 0,
+      totalPages: 1,
+      hasMore: false,
+    };
+  }
   const coreTokens = queryTokens.filter((term) => !["kg", "g", "ml", "l"].includes(term) && !/^\d+(?:\.\d+)?$/.test(term));
   const strictTerms = coreTokens.length ? coreTokens : queryTokens;
-  const candidateLimit = perRetailer > 0
-    ? Math.min(60, Math.max(30, page * perRetailer + perRetailer))
-    : 36;
+  const candidateLimit = perRetailer > 0 ? 60 : 36;
   const [strictResults, profileResult] = await Promise.all([
     findBalancedProductCandidates(env, strictTerms, retailers, {
       matchAll: true,
@@ -1931,6 +1938,11 @@ async function findCatalogue(
       retailer.id,
       valueRankedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length,
     ]));
+    const totalMatches = Object.values(acceptedCounts).reduce((sum, count) => sum + count, 0);
+    const totalPages = Math.max(
+      1,
+      ...Object.values(acceptedCounts).map((count) => Math.ceil(count / perRetailer)),
+    );
     const selectedCounts = Object.fromEntries(retailers.map((retailer) => [
       retailer.id,
       groupedMatches.filter((product) => product.stores[0]?.storeId === retailer.id).length,
@@ -1946,7 +1958,10 @@ async function findCatalogue(
       products: groupedMatches,
       retailerMatches: groupedMatches,
       retailerHasMore,
+      retailerMatchCounts: acceptedCounts,
       retailerDiagnostics,
+      totalMatches,
+      totalPages,
       hasMore: Object.values(retailerHasMore).some(Boolean),
       ...(debug ? {
         parsedIntent: intent,
@@ -1971,6 +1986,8 @@ async function findCatalogue(
   return {
     products: pageMatches,
     retailerMatches: pageMatches,
+    totalMatches: retailerMatches.length,
+    totalPages: Math.max(1, Math.ceil(retailerMatches.length / pageSize)),
     hasMore: retailerMatches.length > start + pageSize,
     ...(debug ? {
       parsedIntent: intent,

@@ -70,7 +70,7 @@ assert.match(landingSource, /pageshow/, "the landing comparison must refresh aft
 assert.match(appSource, /&page=\$\{Math\.max\(1, page\)\}/, "catalogue pagination must be sent to the API");
 assert.match(appSource, /View retailer product/, "retailer product links must remain available");
 assert.match(appSource, /window\.location\.replace\(refreshUrl\.toString\(\)\)/, "stale HTML shells must refresh automatically");
-assert.match(appSource, /service-worker\.js\?v=35/, "the page must request the latest service worker");
+assert.match(appSource, /service-worker\.js\?v=37/, "the page must request the latest service worker");
 assert.match(serviceWorkerSource, /self\.skipWaiting\(\)/, "a repaired service worker must activate immediately");
 assert.match(serviceWorkerSource, /self\.clients\.claim\(\)/, "the repaired service worker must control existing tabs");
 assert.match(serviceWorkerSource, /cache: "no-store"/, "application updates must bypass stale HTTP caches");
