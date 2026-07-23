@@ -78,6 +78,9 @@ export type CatalogueResponse = {
   page?: number;
   pageSize?: number;
   hasMore?: boolean;
+  totalPages?: number;
+  totalMatches?: number;
+  retailerMatchCounts?: Record<string, number>;
   semanticSearchApplied?: boolean;
   semanticCandidateCount?: number;
   products: CatalogueProduct[];

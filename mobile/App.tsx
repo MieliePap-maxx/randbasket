@@ -83,6 +83,7 @@ const scanSteps = [
   "Normalising pack sizes",
   "Preparing your fresh results",
 ];
+const cataloguePageSize = 5;
 
 function locationQuery(settings: Settings) {
   const location = settings.location;
@@ -123,6 +124,7 @@ export default function App() {
   const [catalogueRetailerMatches, setCatalogueRetailerMatches] = useState<CatalogueProduct[]>([]);
   const [cataloguePage, setCataloguePage] = useState(1);
   const [catalogueHasMore, setCatalogueHasMore] = useState(false);
+  const [catalogueRetailerMatchCounts, setCatalogueRetailerMatchCounts] = useState<Record<string, number>>({});
   const [lastRequestedQuery, setLastRequestedQuery] = useState("");
   const [catalogueLoading, setCatalogueLoading] = useState(false);
   const [status, setStatus] = useState("Loading your saved basket...");
@@ -140,6 +142,33 @@ export default function App() {
   const enabledStoreCount = useMemo(() => {
     return stores.filter((store) => settings.stores?.[store.id] !== false).length;
   }, [settings.stores, stores]);
+  const enabledStoreIds = useMemo(
+    () => new Set(stores.filter((store) => settings.stores?.[store.id] !== false).map((store) => store.id)),
+    [settings.stores, stores],
+  );
+  const enabledCatalogueResults = useMemo(
+    () => catalogueResults
+      .map((product) => ({ ...product, stores: product.stores.filter((store) => enabledStoreIds.has(store.storeId)) }))
+      .filter((product) => product.stores.length > 0),
+    [catalogueResults, enabledStoreIds],
+  );
+  const enabledCatalogueRetailerMatches = useMemo(
+    () => catalogueRetailerMatches.filter((product) => enabledStoreIds.has(product.stores[0]?.storeId || "")),
+    [catalogueRetailerMatches, enabledStoreIds],
+  );
+  const enabledSpecials = useMemo(
+    () => specials.filter((special) => enabledStoreIds.has(special.store.storeId)),
+    [enabledStoreIds, specials],
+  );
+  const enabledCatalogueTotalPages = useMemo(
+    () => Math.max(
+      1,
+      ...[...enabledStoreIds].map((storeId) => Math.ceil(
+        Number(catalogueRetailerMatchCounts[storeId] || 0) / cataloguePageSize,
+      )),
+    ),
+    [catalogueRetailerMatchCounts, enabledStoreIds],
+  );
 
   const scanWorkCount = Math.max(1, items.length * Math.max(1, enabledStoreCount));
 
@@ -315,18 +344,37 @@ export default function App() {
       Alert.alert("Search for a product", "Type the grocery item you want to compare.");
       return;
     }
+    if (!enabledStoreIds.size) {
+      setCatalogueResults([]);
+      setCatalogueRetailerMatches([]);
+      setCatalogueRetailerMatchCounts({});
+      setCataloguePage(1);
+      setCatalogueHasMore(false);
+      Alert.alert("Choose a retailer", "Select at least one retailer before searching the catalogue.");
+      return;
+    }
     setCatalogueLoading(true);
     try {
       const payload = await requestJson<CatalogueResponse>(
         apiUrl,
-        `/api/catalogue?q=${encodeURIComponent(query)}&perRetailer=5&page=${page}${locationQuery(settings)}`,
+        `/api/catalogue?q=${encodeURIComponent(query)}&perRetailer=${cataloguePageSize}&page=${page}${locationQuery(settings)}`,
       );
       setCatalogueResults(payload.products || []);
       setCatalogueRetailerMatches(payload.retailerMatches || []);
+      setCatalogueRetailerMatchCounts(payload.retailerMatchCounts || {});
       setCataloguePage(payload.page || page);
-      setCatalogueHasMore(Boolean(payload.hasMore));
-      if (payload.products?.length) {
-        setStatus(`Showing page ${payload.page || page} of catalogue matches`);
+      const totalPages = Math.max(
+        1,
+        ...[...enabledStoreIds].map((storeId) => Math.ceil(
+          Number(payload.retailerMatchCounts?.[storeId] || 0) / cataloguePageSize,
+        )),
+      );
+      setCatalogueHasMore((payload.page || page) < totalPages);
+      const enabledProducts = (payload.retailerMatches || payload.products || []).filter(
+        (product) => enabledStoreIds.has(product.stores[0]?.storeId || ""),
+      );
+      if (enabledProducts.length) {
+        setStatus(`Showing page ${payload.page || page} of ${totalPages} catalogue matches`);
         return;
       }
       if (page > 1) {
@@ -349,7 +397,12 @@ export default function App() {
     try {
       const payload = await requestJson<SpecialsResponse>(apiUrl, `/v1/specials?limit=30${locationQuery(settings)}`);
       setSpecials(payload.specials || []);
-      setStatus(payload.specials?.length ? "Showing current verified catalogue specials." : "No verified specials are available yet.");
+      const enabledSpecialCount = (payload.specials || []).filter(
+        (special) => enabledStoreIds.has(special.store.storeId),
+      ).length;
+      setStatus(enabledSpecialCount
+        ? "Showing current verified catalogue specials for your selected retailers."
+        : "No verified specials are available for your selected retailers.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not load specials");
     } finally {
@@ -406,6 +459,7 @@ export default function App() {
       setCatalogueSearch("");
       setCatalogueResults([]);
       setCatalogueRetailerMatches([]);
+      setCatalogueRetailerMatchCounts({});
       setCataloguePage(1);
       setCatalogueHasMore(false);
     }
@@ -442,6 +496,7 @@ export default function App() {
     setCatalogueSearch("");
     setCatalogueResults([]);
     setCatalogueRetailerMatches([]);
+    setCatalogueRetailerMatchCounts({});
     setCataloguePage(1);
     setCatalogueHasMore(false);
     setStatus(`${name} added to basket`);
@@ -648,26 +703,26 @@ export default function App() {
                     </View>
                   </View>
                 ) : null}
-                {catalogueRetailerMatches.length > 0 ? (
+                {enabledCatalogueRetailerMatches.length > 0 ? (
                   <RetailerMatchComparison
-                    matches={catalogueRetailerMatches}
+                    matches={enabledCatalogueRetailerMatches}
                     query={catalogueSearch.trim()}
                     onAddProduct={(product) => addCatalogueProduct(product, true)}
                   />
                 ) : null}
-                {catalogueResults.length > 0 && catalogueRetailerMatches.length === 0 ? (
+                {enabledCatalogueResults.length > 0 && enabledCatalogueRetailerMatches.length === 0 ? (
                   <View style={styles.catalogueList}>
-                    {catalogueResults.map((product) => (
+                    {enabledCatalogueResults.map((product) => (
                       <CatalogueResult key={product.id} product={product} onAdd={() => addCatalogueProduct(product)} />
                     ))}
                     <View style={styles.paginationRow}>
                       <Button disabled={catalogueLoading || cataloguePage <= 1} label="Previous" variant="quiet" onPress={() => searchCatalogue(cataloguePage - 1)} />
-                      <Text style={styles.paginationText}>Page {cataloguePage}</Text>
-                      <Button disabled={catalogueLoading || !catalogueHasMore} label="More" variant="quiet" onPress={() => searchCatalogue(cataloguePage + 1)} />
+                      <Text style={styles.paginationText}>Page {cataloguePage} of {enabledCatalogueTotalPages}</Text>
+                      <Button disabled={catalogueLoading || !catalogueHasMore || cataloguePage >= enabledCatalogueTotalPages} label="More" variant="quiet" onPress={() => searchCatalogue(cataloguePage + 1)} />
                     </View>
                   </View>
                 ) : null}
-                {catalogueSearch.trim() && !catalogueLoading && catalogueResults.length === 0 ? (
+                {catalogueSearch.trim() && !catalogueLoading && enabledCatalogueResults.length === 0 ? (
                   <View style={styles.requestBox}>
                     <Text style={styles.requestText}>
                       No verified catalogue match yet for "{catalogueSearch.trim()}". A background search will keep looking and add matches when it finds them.
@@ -727,8 +782,8 @@ export default function App() {
                 </View>
                 <Button disabled={specialsLoading} label={specialsLoading ? "Loading..." : "Refresh"} variant="quiet" onPress={loadSpecials} />
               </View>
-              {specialsLoading && !specials.length ? <ActivityIndicator color="#17694c" /> : null}
-              {specials.map((special) => (
+              {specialsLoading && !enabledSpecials.length ? <ActivityIndicator color="#17694c" /> : null}
+              {enabledSpecials.map((special) => (
                 <SpecialCard
                   key={special.id}
                   special={special}
@@ -741,7 +796,7 @@ export default function App() {
                   })}
                 />
               ))}
-              {!specialsLoading && !specials.length ? <Text style={styles.empty}>No verified specials are available yet.</Text> : null}
+              {!specialsLoading && !enabledSpecials.length ? <Text style={styles.empty}>No verified specials are available for the selected retailers.</Text> : null}
             </View>
           ) : null}
 

@@ -1,4 +1,4 @@
-const APP_SHELL_VERSION = "37";
+const APP_SHELL_VERSION = "38";
 const appShellReady = Boolean(
   window.RandBasketCore
   && window.RandBasketLocation
@@ -26,6 +26,7 @@ const state = {
   catalogueResults: [],
   catalogueRetailerMatches: [],
   catalogueRetailerDiagnostics: {},
+  catalogueRetailerMatchCounts: {},
   cataloguePage: 1,
   catalogueTotalPages: 1,
   catalogueHasMore: false,
@@ -224,6 +225,7 @@ function cleanDisplayText(value) {
 }
 
 const comparisonStoreOrder = ["pick-n-pay", "checkers", "woolworths", "spar", "makro"];
+const cataloguePageSize = 5;
 const retailerAliases = [
   "pick n pay",
   "pick and pay",
@@ -304,8 +306,6 @@ function getUnitComparison(product, store) {
 
 function updateSummary() {
   setText("#itemCount", state.items.length);
-  const maxResultsInput = $("#maxResultsInput");
-  if (maxResultsInput) maxResultsInput.value = state.settings.maxResultsPerStore || 5;
 
   const latest = state.latest;
   const bestId = latest?.bestBasketStoreId;
@@ -588,6 +588,7 @@ function renderCatalogueResults() {
   const seenMatches = new Set();
   const matches = retailerMatches
     .flatMap((product) => (product.stores || [])
+      .filter((store) => state.settings.stores?.[store.storeId] !== false)
       .map((store) => ({ product, store, comparison: getUnitComparison(product, store) })))
     .filter(({ product, store }) => {
       const key = `${store.storeId}|${store.url || product.id}|${store.price}`;
@@ -627,7 +628,9 @@ function renderCatalogueResults() {
     return left.store.productName.localeCompare(right.store.productName);
   }));
 
-  defaultStores.forEach((retailer) => {
+  defaultStores
+    .filter((retailer) => state.settings.stores?.[retailer.id] !== false)
+    .forEach((retailer) => {
     const storeMatches = groupedMatches.get(retailer.id) || [];
     const diagnostics = state.catalogueRetailerDiagnostics[retailer.id] || {};
     const column = document.createElement("section");
@@ -707,7 +710,7 @@ function renderCatalogueResults() {
       columnMatches.appendChild(article);
     });
     wrap.appendChild(column);
-  });
+    });
 }
 
 async function addCatalogueProductToBasket(product, store, preferredQuery = "") {
@@ -771,18 +774,35 @@ async function searchCatalogue(page = 1, scrollToTop = false) {
   $("#catalogueStatus").textContent = "Finding the closest retailer matches...";
   try {
     readSettingsFromDom();
-    const matchesPerRetailer = Math.min(5, Math.max(1, Number(state.settings.maxResultsPerStore || 5)));
-    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${matchesPerRetailer}&page=${Math.max(1, page)}${locationQuery()}`);
+    const enabledRetailers = defaultStores.filter((retailer) => state.settings.stores?.[retailer.id] !== false);
+    if (!enabledRetailers.length) {
+      state.catalogueResults = [];
+      state.catalogueRetailerMatches = [];
+      state.catalogueRetailerMatchCounts = {};
+      state.cataloguePage = 1;
+      state.catalogueTotalPages = 1;
+      state.catalogueHasMore = false;
+      $("#catalogueStatus").textContent = "Select at least one retailer under Stores to check.";
+      renderCatalogueResults();
+      return;
+    }
+    const payload = await api(`/v1/catalogue?q=${encodeURIComponent(query)}&perRetailer=${cataloguePageSize}&page=${Math.max(1, page)}${locationQuery()}`);
     state.catalogueResults = payload.products || [];
     state.catalogueRetailerMatches = payload.retailerMatches || [];
     state.catalogueRetailerDiagnostics = payload.retailerDiagnostics || {};
+    state.catalogueRetailerMatchCounts = payload.retailerMatchCounts || {};
     state.cataloguePage = payload.page || Math.max(1, page);
-    state.catalogueHasMore = Boolean(payload.hasMore || Object.values(payload.retailerHasMore || {}).some(Boolean));
     state.catalogueTotalPages = Math.max(
-      state.cataloguePage,
-      Number(payload.totalPages) || (state.catalogueHasMore ? state.cataloguePage + 1 : state.cataloguePage),
+      1,
+      ...enabledRetailers.map((retailer) => Math.ceil(
+        Number(state.catalogueRetailerMatchCounts[retailer.id] || 0) / cataloguePageSize,
+      )),
     );
-    $("#catalogueStatus").textContent = state.catalogueResults.length
+    state.catalogueHasMore = state.cataloguePage < state.catalogueTotalPages;
+    const enabledResultCount = state.catalogueRetailerMatches.filter(
+      (product) => state.settings.stores?.[product.stores?.[0]?.storeId] !== false,
+    ).length;
+    $("#catalogueStatus").textContent = enabledResultCount
       ? `Comparable unit prices for ${query}`
       : "No priced catalogue matches yet.";
     renderCatalogueResults();
@@ -805,7 +825,6 @@ function readItemsFromDom() {
 }
 
 function readSettingsFromDom() {
-  state.settings.maxResultsPerStore = Number($("#maxResultsInput").value || 5);
   state.settings.stores = {};
   $("#storeToggles")
     .querySelectorAll("input[type='checkbox']")
@@ -1102,11 +1121,14 @@ function setSpecialsOpen(open) {
 function renderSpecials() {
   const wrap = $("#specialsGrid");
   wrap.innerHTML = "";
-  if (!state.specials.length) {
+  const enabledSpecials = state.specials.filter(
+    (special) => state.settings.stores?.[special.store.storeId] !== false,
+  );
+  if (!enabledSpecials.length) {
     wrap.innerHTML = `<div class="empty">No verified catalogue specials are available for this selection yet.</div>`;
     return;
   }
-  state.specials.forEach((special) => {
+  enabledSpecials.forEach((special) => {
     const store = special.store;
     const card = document.createElement("article");
     card.className = "special-card";
@@ -1153,8 +1175,11 @@ async function loadSpecials() {
     const payload = await api(`/v1/specials?limit=30${retailerQuery}${locationQuery()}`);
     state.specials = payload.specials || [];
     state.specialsLoaded = true;
-    $("#specialsStatus").textContent = state.specials.length
-      ? `${state.specials.length} verified offers. These prices are included in matching Price Checker results.`
+    const enabledSpecialCount = state.specials.filter(
+      (special) => state.settings.stores?.[special.store.storeId] !== false,
+    ).length;
+    $("#specialsStatus").textContent = enabledSpecialCount
+      ? `${enabledSpecialCount} verified offers. These prices are included in matching Price Checker results.`
       : "No verified specials are available for this selection yet.";
     renderSpecials();
   } catch {
@@ -1427,8 +1452,15 @@ function wireEvents() {
   });
   $("#specialsRefreshBtn").addEventListener("click", loadSpecials);
   $("#specialsRetailer").addEventListener("change", loadSpecials);
-  $("#maxResultsInput").addEventListener("change", () => scheduleBasketScan());
-  $("#storeToggles").addEventListener("change", () => scheduleBasketScan());
+  $("#storeToggles").addEventListener("change", () => {
+    readSettingsFromDom();
+    saveDeviceState();
+    renderCatalogueResults();
+    renderSpecials();
+    if (state.catalogueQuery) void searchCatalogue(1);
+    if (state.specialsLoaded) void loadSpecials();
+    scheduleBasketScan();
+  });
   $("#itemsBody").addEventListener("input", (event) => {
     if (event.target.matches('[data-field="quantity"]')) scheduleBasketScan(650);
   });
@@ -1527,7 +1559,7 @@ locationSession.subscribe((location) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js?v=37", { updateViaCache: "none" })
+      .register("./service-worker.js?v=38", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
   });
